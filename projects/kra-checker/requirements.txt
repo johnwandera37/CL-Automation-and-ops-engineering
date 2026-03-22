@@ -1,0 +1,23 @@
+# KRA Auto-Checker v2.1 Dependencies
+# Install with: pip install -r requirements.txt
+
+# SQL Server connectivity
+pyodbc>=4.0.39
+
+# Google Sheets / Drive API
+google-api-python-client>=2.108.0
+google-auth>=2.25.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
+
+# HTTP requests (KRA link checking + auto-updater downloads)
+requests>=2.31.0
+
+# Version comparison (auto-updater)
+packaging>=23.2
+
+# Excel processing (optional — deployment generator)
+openpyxl>=3.1.0
+
+# Build standalone exe
+pyinstaller>=6.3.0

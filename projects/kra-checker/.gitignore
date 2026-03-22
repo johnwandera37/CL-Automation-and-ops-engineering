@@ -1,0 +1,15 @@
+# Sensitive files - NEVER commit these
+credentials.json
+config.json
+
+# KRA_Installer - no need to share
+KRA_Installer/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db

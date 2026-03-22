@@ -1,0 +1,17 @@
+pyinstaller --onefile --console --name kra_checker kra_auto_checker.py
+
+pyinstaller --onefile --console --name heartbeat_monitor heartbeat_monitor.py
+```
+
+**Step 3 — Assemble your deployment folder**
+
+After building, your `dist/` folder will have the two exes. Create a clean folder like `KRA_Installer\` and put these in it:
+```
+KRA_Installer/
+├── kra_checker.exe          ← from dist/
+├── heartbeat_monitor.exe    ← from dist/
+├── install.bat
+├── config.json              ← leave station_name and anydesk_code blank
+├── credentials.json         ← your Google service account key
+├── anydesk_detector.py
+└── fetch_station_info.py

@@ -1,0 +1,11 @@
+KRA_Installer/
+│
+├── install.exe              ← technician double-clicks this
+├── credentials.json         ← your Google service account key
+├── config.json              ← template (station_name/anydesk blank)
+│
+├── kra_checker.exe          ← built from kra_auto_checker.py
+├── heartbeat_monitor.exe    ← built from heartbeat_monitor.py
+│
+├── anydesk_detector.py      ← called by install.bat during setup
+└── fetch_station_info.py    ← called by install.bat during setup
