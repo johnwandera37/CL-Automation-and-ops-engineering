@@ -4,5 +4,6 @@ Collection of automation and operational tools.
 
 ## Projects
 
-- new-kra-checker → projects/new-kra-checker
+- kra-checker → projects/kra-checker
+- copy_to_trns_sales →projects/copy_to_trns_sales
 

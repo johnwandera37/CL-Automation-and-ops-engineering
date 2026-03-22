@@ -1,0 +1,1 @@
+pyinstaller --onefile copy_to_trns_sales.py
