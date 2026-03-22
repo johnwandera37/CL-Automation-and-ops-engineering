@@ -1,0 +1,12 @@
+# Sensitive files - NEVER commit these
+credentials.json
+config.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db

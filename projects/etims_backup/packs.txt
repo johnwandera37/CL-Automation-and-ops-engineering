@@ -1,0 +1,3 @@
+pip install google-auth google-auth-oauthlib google-api-python-client openpyxl
+
+pip install pyinstaller

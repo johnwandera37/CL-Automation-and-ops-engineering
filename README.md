@@ -5,5 +5,6 @@ Collection of automation and operational tools.
 ## Projects
 
 - kra-checker → projects/kra-checker
-- copy_to_trns_sales →projects/copy_to_trns_sales
+- copy_to_trns_sales → projects/copy_to_trns_sales
+- etims_backup → projects/etims_backup
 
