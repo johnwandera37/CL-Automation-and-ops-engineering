@@ -14,6 +14,7 @@ import requests
 import re
 import json
 import logging
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 import time
 import sys
 import os

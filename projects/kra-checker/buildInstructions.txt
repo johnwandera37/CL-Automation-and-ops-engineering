@@ -1,6 +1,16 @@
 pyinstaller --onefile --console --name kra_checker kra_auto_checker.py
 
 pyinstaller --onefile --console --name heartbeat_monitor heartbeat_monitor.py
+
+pyinstaller --onefile --console --name install install.py
+
+
+use the following to bypass the error pyodbc being missed
+
+pyinstaller --onefile --console --name kra_checker --hidden-import pyodbc --hidden-import googleapiclient --hidden-import google.auth --hidden-import google.oauth2.service_account kra_auto_checker.py
+
+pyinstaller --onefile --console --name heartbeat_monitor --hidden-import pyodbc --hidden-import googleapiclient --hidden-import google.auth --hidden-import google.oauth2.service_account heartbeat_monitor.py
+
 ```
 
 **Step 3 — Assemble your deployment folder**
@@ -10,7 +20,7 @@ After building, your `dist/` folder will have the two exes. Create a clean folde
 KRA_Installer/
 ├── kra_checker.exe          ← from dist/
 ├── heartbeat_monitor.exe    ← from dist/
-├── install.bat
+├── install.exe
 ├── config.json              ← leave station_name and anydesk_code blank
 ├── credentials.json         ← your Google service account key
 ├── anydesk_detector.py

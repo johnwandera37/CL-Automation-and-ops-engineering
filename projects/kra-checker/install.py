@@ -1,6 +1,10 @@
 """
-KRA Auto-Checker Installer v2.2
-Run as Administrator:  python install.py
+KRA Auto-Checker Installer v2.4
+- Auto-detects AnyDesk ID
+- Looks up station name from Automation Helper sheet
+- If station not found, prompts for name and writes it back to the sheet
+- Self-elevates to Administrator (double-click friendly)
+- No Python required on target stations (build with PyInstaller)
 """
 
 import os
@@ -9,8 +13,13 @@ import json
 import shutil
 import subprocess
 import ctypes
+import logging
 
-INSTALL_DIR = r"C:\KRA_Checker"
+# Suppress google file_cache warning globally
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
+
+BASE_OPS_DIR = r"C:\Automation_and_ops_engineering"
+INSTALL_DIR  = os.path.join(BASE_OPS_DIR, "KRA_Checker")
 REQUIRED_FILES = [
     "kra_checker.exe",
     "heartbeat_monitor.exe",
@@ -20,31 +29,43 @@ REQUIRED_FILES = [
     "fetch_station_info.py",
 ]
 
+
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except Exception:
         return False
 
+
+def self_elevate():
+    """Re-launch this script as Administrator if not already elevated."""
+    if is_admin():
+        return
+    print("Requesting Administrator privileges...")
+    # Re-run as admin — works for both .py and .exe
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, " ".join(sys.argv), None, 1
+    )
+    sys.exit(0)
+
+
 def banner(msg):
-    print(f"\n{'='*50}")
+    print(f"\n{'='*52}")
     print(f"  {msg}")
-    print('='*50)
+    print("=" * 52)
+
 
 def step(n, total, msg):
     print(f"\n[{n}/{total}] {msg}...")
 
+
 def main():
-    banner("KRA Auto-Checker Installation v2.2")
+    # ── Auto-elevate to admin ─────────────────────────────────────────
+    self_elevate()
 
-    # ── Admin check ───────────────────────────────────────────────────
-    if not is_admin():
-        print("ERROR: Please run this script as Administrator.")
-        print("  Right-click CMD -> Run as Administrator, then run: python install.py")
-        input("\nPress Enter to exit...")
-        sys.exit(1)
+    banner("KRA Auto-Checker Installation v2.4")
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 
     # ── Step 1: Verify files ──────────────────────────────────────────
     step(1, 7, "Verifying files")
@@ -67,25 +88,32 @@ def main():
 
     # ── Step 3: Detect AnyDesk ID ─────────────────────────────────────
     step(3, 7, "Detecting AnyDesk ID")
-    result = subprocess.run([sys.executable, "anydesk_detector.py"])
+
+    # Import directly instead of subprocess so it works inside the exe
+    sys.path.insert(0, INSTALL_DIR)
     detected_anydesk = None
 
-    anydesk_file = os.path.join(INSTALL_DIR, "detected_anydesk.txt")
-    if result.returncode == 0 and os.path.exists(anydesk_file):
-        with open(anydesk_file) as f:
-            detected_anydesk = f.read().strip()
-        print(f"  AnyDesk ID: {detected_anydesk}")
-    else:
+    try:
+        from anydesk_detector import get_anydesk_id
+        detected_anydesk = get_anydesk_id()
+    except Exception as e:
+        print(f"  Detection error: {e}")
+
+    if not detected_anydesk:
         print("\n  WARNING: Could not auto-detect AnyDesk ID.")
         print("  Make sure AnyDesk is installed and has been opened at least once.")
         detected_anydesk = input("\n  Enter AnyDesk code manually (or leave blank to skip): ").strip()
         if not detected_anydesk:
             detected_anydesk = "UNKNOWN"
-            print("  Skipping AnyDesk — set it manually in config.json later.")
+            print("  Skipping — set anydesk_code in config.json manually later.")
+    else:
+        print(f"  AnyDesk ID: {detected_anydesk}")
 
-    # ── Step 4: Look up station name ──────────────────────────────────
+    # ── Step 4: Look up station name from sheet ───────────────────────
     step(4, 7, "Looking up station in Automation Helper sheet")
     station_name = None
+    helper_sheet_id = None
+    creds_file = os.path.join(INSTALL_DIR, "credentials.json")
 
     try:
         with open(os.path.join(INSTALL_DIR, "config.json")) as f:
@@ -93,31 +121,46 @@ def main():
         helper_sheet_id = config.get("automation_helper_sheet_id", "")
 
         if not helper_sheet_id:
-            print("  WARNING: automation_helper_sheet_id not set in config.json")
+            print("  WARNING: automation_helper_sheet_id not in config.json")
+        elif detected_anydesk == "UNKNOWN":
+            print("  Skipping sheet lookup — AnyDesk code unknown")
         else:
-            creds_file = os.path.join(INSTALL_DIR, "credentials.json")
-            result = subprocess.run(
-                [sys.executable, "fetch_station_info.py", creds_file, helper_sheet_id]
+            from fetch_station_info import fetch_station_by_anydesk
+            station_name = fetch_station_by_anydesk(
+                detected_anydesk, creds_file, helper_sheet_id
             )
-
-            station_file = os.path.join(INSTALL_DIR, "detected_station.txt")
-            if result.returncode == 0 and os.path.exists(station_file):
-                with open(station_file) as f:
-                    station_name = f.read().strip()
+            if station_name:
                 print(f"  Station identified: {station_name}")
             else:
-                print("  WARNING: AnyDesk code not found in Station Mapping sheet.")
-                print("  Check that the code is listed in the Automation Helper spreadsheet.")
+                print("  Station not found in sheet.")
 
     except Exception as e:
-        print(f"  WARNING: Could not read config: {e}")
+        print(f"  WARNING: Sheet lookup failed: {e}")
 
+    # ── If not found — ask and write back to sheet ────────────────────
     if not station_name:
-        station_name = input("\n  Enter station name manually: ").strip()
+        print("\n  This station is not in the Automation Helper sheet yet.")
+        station_name = input("  Enter station name to register: ").strip()
         if not station_name:
             print("  ERROR: Station name cannot be empty.")
             input("\nPress Enter to exit...")
             sys.exit(1)
+
+        if helper_sheet_id and detected_anydesk != "UNKNOWN":
+            print(f"\n  Adding '{station_name}' to the Station Mapping sheet...")
+            try:
+                from fetch_station_info import add_station_to_sheet
+                success = add_station_to_sheet(
+                    station_name, detected_anydesk, creds_file, helper_sheet_id
+                )
+                if success:
+                    print(f"  Sheet updated — other tools will now recognise this station.")
+                else:
+                    print(f"  Could not update sheet automatically. Please add it manually.")
+            except Exception as e:
+                print(f"  Sheet write failed: {e} — please add manually.")
+        else:
+            print("  Skipping sheet update (missing sheet ID or AnyDesk code).")
 
     # ── Step 5: Confirm details ───────────────────────────────────────
     step(5, 7, "Final configuration")
@@ -163,19 +206,18 @@ def main():
     ]
 
     for task_name, exe_path, schedule in tasks:
-        # Delete existing
         subprocess.run(
             f'schtasks /delete /tn "{task_name}" /f',
             shell=True, capture_output=True
         )
-        # Create new
-        cmd = f'schtasks /create /tn "{task_name}" /tr "{exe_path}" {schedule} /f /rl highest'
-        result = subprocess.run(cmd, shell=True, capture_output=True)
+        result = subprocess.run(
+            f'schtasks /create /tn "{task_name}" /tr "{exe_path}" {schedule} /f /rl highest',
+            shell=True, capture_output=True
+        )
         if result.returncode == 0:
             print(f"  Created: {task_name}")
         else:
-            print(f"  ERROR: Could not create task '{task_name}'")
-            print(f"  {result.stderr.decode()}")
+            print(f"  ERROR creating task '{task_name}': {result.stderr.decode()}")
 
     # ── Verification ──────────────────────────────────────────────────
     print("\n  Verifying installation:")
@@ -196,7 +238,7 @@ def main():
     print(f"  AnyDesk  : {detected_anydesk}")
     print(f"  Directory: {INSTALL_DIR}")
     print(f"""
-  Tasks created:
+  Tasks:
     KRA Auto Checker  - daily at 7:00 PM
     Station Heartbeat - every 30 minutes
 
@@ -204,7 +246,7 @@ def main():
     {kra_exe}
     {heartbeat_exe}
 
-  View results in your Google Spreadsheet:
+  Results in Google Spreadsheet:
     Report tab         - KRA check results
     Station Status tab - connectivity status
     Logs tab           - detailed event log

@@ -9,6 +9,7 @@ Runs every 30 minutes (via Windows Task Scheduler).
 
 import socket
 import logging
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 import sys
 import os
 import platform

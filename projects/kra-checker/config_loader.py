@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import logging
+logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
