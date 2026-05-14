@@ -1,15 +1,31 @@
 # Sensitive files - NEVER commit these
 credentials.json
-config.json
 
-# KRA_Installer - no need to share
+# KRA_Installer and Builder - no need to share
 KRA_Installer/
+Builder/
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
 
+# PyInstaller
+build/
+dist/
+*.spec
+
 # OS files
 .DS_Store
 Thumbs.db
+
+# Executables
+*.exe
+# Local flags
+.lastdate_*
+
+# IDE
+.vscode/
+.idea/
+
+inputPasswordTest.py

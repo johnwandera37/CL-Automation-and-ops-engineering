@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 # Station-specific keys that should NEVER be overridden by the global sheet
 STATION_ONLY_KEYS = {
-    "station_name",
-    "anydesk_code",
-    "sql_server",
-    "sql_database",
-    "sql_username",
-    "sql_password",
-    "service_account_file",
-    "spreadsheet_id",
-    "automation_helper_sheet_id",
+    "station_name",           # set at install from Station Mapping sheet
+    "anydesk_code",           # detected at install by anydesk_detector
+    "sql_server",             # station-specific SQL setup
+    "sql_database",           # always ETIMS but may vary
+    "sql_username",           # always sa but may vary
+    "sql_password",           # security sensitive, set at install only
+    "service_account_file",   # replaced manually if credentials rotate
+    "automation_helper_sheet_id",  # root of config system — never override remotely
+    # spreadsheet_id is intentionally NOT here — can be switched remotely
 }
 
 try:
@@ -154,3 +154,16 @@ class ConfigLoader:
         except Exception as e:
             logger.warning(f"Could not load global config from sheet: {e}")
             return {}
+
+
+if __name__ == "__main__":
+    import sys
+    logging.basicConfig(level=logging.WARNING)  # suppress info noise during test
+    c = ConfigLoader()
+    print("\n--- Merged Config (local + global sheet) ---")
+    for key, value in sorted(c.config.items()):
+        if "password" not in key.lower():
+            print(f"  {key:<40} {value}")
+    print("\n--- Source check (local vs sheet) ---")
+    print(f"  timeout      local=config.json   sheet overrides to: {c.get('timeout')}")
+    print(f"  retry_delay  local=config.json   sheet overrides to: {c.get('retry_delay')}")

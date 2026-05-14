@@ -1,0 +1,26 @@
+{
+  "station_name": "",
+  "anydesk_code": "",
+  "sql_server": ".\\SQLEXPRESS",
+  "sql_database": "Database name",
+  "sql_username": "Usename created when setting db",
+  "sql_password": "Password db",
+  "service_account_file": "credentials.json",
+  "automation_helper_sheet_id": "Sheet id where you have the Global config sheet and Station Mapping sheet",
+  "spreadsheet_id": "The id of the sheet where the Repot, Station Status, Logs and HeartbeatLogs sheets will be created",
+  "max_retries": 3,
+  "retry_delay": 30,
+  "timeout": 15,
+  "retry_hours": [
+    0,
+    2,
+    4
+  ],
+  "retry_file": "retry_transaction.json",
+  "heartbeat_interval": 3,
+  "kra_check_time": "21:51",
+  "current_version_kra": "1.0.0",
+  "current_version_heartbeat": "1.0.0",
+  "kra_checker_drive_id": "Drive id of the kra_checker file to be download once uploaded to your google drive",
+  "heartbeat_monitor_drive_id": "Drive id of the heartbeat_monitor file to be download once uploaded to your google drive"
+}

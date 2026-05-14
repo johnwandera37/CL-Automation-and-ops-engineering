@@ -7,6 +7,7 @@ KRA Auto-Checker Installer v2.4
 - No Python required on target stations (build with PyInstaller)
 """
 
+# import getpass
 import os
 import sys
 import json
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import ctypes
 import logging
+import task_scheduler
 
 # Suppress google file_cache warning globally
 logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
@@ -23,10 +25,11 @@ INSTALL_DIR  = os.path.join(BASE_OPS_DIR, "KRA_Checker")
 REQUIRED_FILES = [
     "kra_checker.exe",
     "heartbeat_monitor.exe",
+    "uninstall.exe",
     "credentials.json",
     "config.json",
     "anydesk_detector.py",
-    "fetch_station_info.py",
+    "fetch_station_info.py", 
 ]
 
 
@@ -63,6 +66,7 @@ def main():
     # ── Auto-elevate to admin ─────────────────────────────────────────
     self_elevate()
 
+    banner("johnwandera org")
     banner("KRA Auto-Checker Installation v2.4")
 
     script_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
@@ -194,32 +198,275 @@ def main():
         if os.path.exists(path):
             os.remove(path)
 
+    # ── Mark station as installed in Automation Helper sheet ─────────────
+    print("  Updating Station Mapping sheet...")
+    try:
+        from googleapiclient.discovery import build as gbuild
+        from google.oauth2 import service_account as gsa
+        from datetime import datetime
+
+        with open(os.path.join(INSTALL_DIR, "config.json")) as f:
+            _cfg = json.load(f)
+
+        _creds = gsa.Credentials.from_service_account_file(
+            os.path.join(INSTALL_DIR, "credentials.json"),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        _svc = gbuild("sheets", "v4", credentials=_creds)
+        _helper_id = _cfg.get("automation_helper_sheet_id")
+        _kra_ver   = _cfg.get("current_version_kra", "1.0.0")
+        _hb_ver    = _cfg.get("current_version_heartbeat", "1.0.0")
+
+        # Find the station row by AnyDesk code
+        _result = _svc.spreadsheets().values().get(
+            spreadsheetId=_helper_id,
+            range="Station Mapping!A:B"
+        ).execute()
+        _rows = _result.get("values", [])
+        _row_num = None
+        for _i, _row in enumerate(_rows):
+            if len(_row) >= 2 and str(_row[1]).strip() == str(detected_anydesk).strip():
+                _row_num = _i + 1
+                break
+
+        if _row_num:
+            # Ensure headers exist in C:G
+            _headers = _svc.spreadsheets().values().get(
+                spreadsheetId=_helper_id,
+                range="Station Mapping!C1:G1"
+            ).execute().get("values", [[]])
+            if not _headers or _headers[0] != ["Installed", "KRA Checker", "KRA Updated", "Heartbeat Monitor", "HB Updated"]:
+                _svc.spreadsheets().values().update(
+                    spreadsheetId=_helper_id,
+                    range="Station Mapping!C1:G1",
+                    valueInputOption="RAW",
+                    body={"values": [["Installed", "KRA Checker", "KRA Updated", "Heartbeat Monitor", "HB Updated"]]}
+                ).execute()
+
+            # Write install record
+            _install_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _svc.spreadsheets().values().update(
+                spreadsheetId=_helper_id,
+                range=f"Station Mapping!C{_row_num}:G{_row_num}",
+                valueInputOption="RAW",
+                body={"values": [[
+                    f"✅ {_install_date}",
+                    _kra_ver,
+                    "",
+                    _hb_ver,
+                    ""
+                ]]}
+            ).execute()
+            print(f"  Station Mapping updated for row {_row_num}")
+        else:
+            print("  Could not find station row — skipping sheet update")
+    except Exception as _e:
+        print(f"  Could not update Station Mapping: {_e}")
+
+    # Enable Task Scheduler history
+    # history enabled automatically # no technician action needed # all stations become diagnosable remotely
+    subprocess.run(
+        'wevtutil set-log Microsoft-Windows-TaskScheduler/Operational /enabled:true',
+        shell=True,
+        capture_output=True
+    )
+    # Enabling history:
+    # does NOT noticeably affect performance
+    # does NOT noticeably affect disk space
+    # is standard in enterprise automation systems
+
     # ── Step 7: Create Scheduled Tasks ───────────────────────────────
     step(7, 7, "Creating scheduled tasks")
 
     kra_exe       = os.path.join(INSTALL_DIR, "kra_checker.exe")
     heartbeat_exe = os.path.join(INSTALL_DIR, "heartbeat_monitor.exe")
 
+    # Create silent VBS launchers — Task Scheduler calls these
+    # so the exe starts with zero visible window
+
+    kra_vbs       = os.path.join(INSTALL_DIR, "run_kra_checker.vbs")
+    heartbeat_vbs = os.path.join(INSTALL_DIR, "run_heartbeat.vbs")
+
+    # for vbs_path, exe_path in [(kra_vbs, kra_exe), (heartbeat_vbs, heartbeat_exe)]:
+    #     with open(vbs_path, "w") as _vf:
+    #         # Set working directory so the exe finds config.json and credentials.json
+    #         _vf.write(
+    #             f'Dim sh\n'
+    #             f'Set sh = CreateObject("WScript.Shell")\n'
+    #             f'sh.CurrentDirectory = "{INSTALL_DIR}"\n'
+    #             f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
+    #         )
+
+    task_scheduler.create_vbs_launcher(
+        kra_vbs,
+        kra_exe,
+        INSTALL_DIR
+    )
+
+    task_scheduler.create_vbs_launcher(
+        heartbeat_vbs,
+        heartbeat_exe,
+        INSTALL_DIR
+    )
+
+    # Read schedule values from deployed config.json
+    try:
+        with open(os.path.join(INSTALL_DIR, "config.json")) as _f:
+            _cfg = json.load(_f)
+        heartbeat_interval = int(_cfg.get("heartbeat_interval", 30))
+        kra_check_time     = _cfg.get("kra_check_time", "19:00")
+    except Exception:
+        heartbeat_interval = 30
+        kra_check_time     = "19:00"
+
+    print(f"  Heartbeat interval : every {heartbeat_interval} min")
+    print(f"  KRA check time     : {kra_check_time}")
+
+    # print("\nWindows Task Scheduler Authentication")
+    # print("Enter the CURRENT Windows account credentials")
+    # print("These are required so tasks can run even when logged out.\n")
+
+    # print("\nNOTE:")
+    # print("Enter your actual Windows account PASSWORD.")
+    # print("Do NOT enter your Windows PIN.")
+    # print("The password will not be visible while typing.\n")
+
+    # windows_user = subprocess.check_output(
+    #     "whoami",
+    #     shell=True,
+    #     text=True
+    # ).strip()
+
+    # print(f"Detected Windows user: {windows_user}")
+    # # This prevents: # silent scheduler failure # broken unattended execution # partial installation success # confusing post-install issues # Very important for reliability.
+    # while True:
+
+    #     windows_pass = getpass.getpass(
+    #         "Windows Password (input hidden): "
+    #     ).strip()
+
+    #     if not windows_pass:
+    #         print("\n[ERROR] Windows password cannot be blank.")
+    #         print("Scheduled tasks require the current account password.\n")
+    #         continue
+
+    #     # Validate credentials using a temporary test task
+    #     test_cmd = (
+    #         f'schtasks /create '
+    #         f'/tn "KRA_TEST_TASK" '
+    #         f'/tr "cmd.exe /c exit" '
+    #         f'/sc once /st 23:59 '
+    #         f'/f '
+    #         f'/ru "{windows_user}" '
+    #         f'/rp "{windows_pass}"'
+    #     )
+
+    #     test_result = subprocess.run(
+    #         test_cmd,
+    #         shell=True,
+    #         capture_output=True,
+    #         text=True
+    #     )
+
+    #     if test_result.returncode == 0:
+
+    #         # Cleanup temporary validation task
+    #         subprocess.run(
+    #             'schtasks /delete /tn "KRA_TEST_TASK" /f',
+    #             shell=True,
+    #             capture_output=True
+    #         )
+
+    #         print("\n[OK] Windows credentials verified.\n")
+    #         break
+
+    #     else:
+    #         print("\n[ERROR] Invalid Windows password or insufficient permissions.\n")
+    #         print(test_result.stderr)
+
+
+
     tasks = [
-        ("KRA Auto Checker",  kra_exe,       "/sc daily /st 19:00"),
-        ("Station Heartbeat", heartbeat_exe, "/sc minute /mo 30"),
+        ("KRA Auto Checker",  f'wscript.exe "{kra_vbs}"',       f"/sc daily /st {kra_check_time}"),
+        ("Station Heartbeat", f'wscript.exe "{heartbeat_vbs}"', f"/sc minute /mo {heartbeat_interval} /st 00:00"),
     ]
 
-    for task_name, exe_path, schedule in tasks:
-        subprocess.run(
-            f'schtasks /delete /tn "{task_name}" /f',
-            shell=True, capture_output=True
+    for task_name, task_cmd, schedule in tasks:
+        # windows_user, windows_pass
+        ok = task_scheduler.create_or_update_task(
+        task_name, task_cmd, schedule,
         )
-        result = subprocess.run(
-            f'schtasks /create /tn "{task_name}" /tr "{exe_path}" {schedule} /f /rl highest',
-            shell=True, capture_output=True
-        )
-        if result.returncode == 0:
-            print(f"  Created: {task_name}")
-        else:
-            print(f"  ERROR creating task '{task_name}': {result.stderr.decode()}")
+        if not ok:
+            print(f"  ERROR creating '{task_name}'")
 
-    # ── Verification ──────────────────────────────────────────────────
+
+        # subprocess.run(f'schtasks /delete /tn "{task_name}" /f', shell=True, capture_output=True)
+        
+        # # This alone fixes: # run while locked # run while logged out # unattended execution # reboot persistence
+        # result = subprocess.run(
+        # f'schtasks /create '
+        # f'/tn "{task_name}" '
+        # f'/tr "{task_cmd}" '
+        # f'{schedule} '
+        # f'/f '
+        # f'/rl highest '
+        # f'/ru "{windows_user}" '
+        # f'/rp "{windows_pass}"',
+        # shell=True,
+        # capture_output=True,
+        # text=True
+        # )
+        
+        # if result.returncode == 0:
+        #     # schtasks.exe cannot configure ALL advanced settings directly.
+        #     # stop existing instance # battery conditions # missed task handling
+        #     # So we use PowerShell immediately AFTER creation.
+        #     # THIS FIXES:
+        #     # Power issues
+
+        #     # Disables: # “Start only on AC” # “Stop on battery”
+        #     # Missed schedule recovery # Enables: # Run task as soon as possible after missed start
+        #     # Hung process recovery # Sets: # Stop existing instance # This is VERY important.
+            
+        #     settings_cmd = (
+        #         f'powershell -Command '
+        #         f'"$settings = New-ScheduledTaskSettingsSet '
+        #         f'-AllowStartIfOnBatteries '
+        #         f'-DontStopIfGoingOnBatteries '
+        #         f'-StartWhenAvailable '
+        #         f'-WakeToRun '
+        #         f'-MultipleInstances IgnoreNew '
+        #         f'-ExecutionTimeLimit (New-TimeSpan -Days 0); '
+
+        #         f'Set-ScheduledTask '
+        #         f'-TaskName \'{task_name}\' '
+        #         f'-Settings $settings '
+        #         f'-User "{windows_user}" '
+        #         f'-Password "{windows_pass}""'
+        #     )
+
+        #     settings_result = subprocess.run(
+        #         settings_cmd,
+        #         shell=True,
+        #         capture_output=True,
+        #         text=True
+        #     )
+
+        #     if settings_result.returncode != 0:
+        #         print("Failed to update task settings")
+        #         print(settings_result.stderr)
+        #     else:
+        #         print(f"  Updated settings: {task_name}")
+
+        #     # Check if tasks are actually created
+        #     # print(settings_result.stdout)
+        #     # print(settings_result.stderr)
+
+        #     print(f"  Created: {task_name}")
+
+        # else:
+        #     print(f"  ERROR creating '{task_name}': {result.stderr.strip()}")
+
     print("\n  Verifying installation:")
     for f in ["kra_checker.exe", "heartbeat_monitor.exe", "credentials.json", "config.json"]:
         exists = os.path.exists(os.path.join(INSTALL_DIR, f))
@@ -239,8 +486,8 @@ def main():
     print(f"  Directory: {INSTALL_DIR}")
     print(f"""
   Tasks:
-    KRA Auto Checker  - daily at 7:00 PM
-    Station Heartbeat - every 30 minutes
+    KRA Auto Checker  - daily at {kra_check_time}
+    Station Heartbeat - every {heartbeat_interval} min
 
   To test manually:
     {kra_exe}

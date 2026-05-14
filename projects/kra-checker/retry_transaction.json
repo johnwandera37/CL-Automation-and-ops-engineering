@@ -1,0 +1,13 @@
+{
+    "retry_count": 2,
+    "saved_at": "2026-05-07 23:25:21",
+    "transactions": [
+        {
+            "transaction_date": "2025-08-19 03:36:10",
+            "qr_link": "https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsReceiptData?Data=P052160332H01276VWTSUNMQTCBXZ",
+            "check_date": "2025-08-19",
+            "payment_mode": "CASH",
+            "last_status": "ERROR"
+        }
+    ]
+}

@@ -1,15 +1,52 @@
-pyinstaller --onefile --console --name kra_checker kra_auto_checker.py
+For a clean reinstallation remove the following,
+REM 1. Delete ALL PyInstaller artifacts
+rd /s /q dist
+rd /s /q build
+del /f /q kra_checker.spec
+del /f /q heartbeat_monitor.spec
+del /f /q install.spec
 
-pyinstaller --onefile --console --name heartbeat_monitor heartbeat_monitor.py
+REM 2. Also delete Python cache
+rd /s /q __pycache__
+del /f /q *.pyc
 
-pyinstaller --onefile --console --name install install.py
 
 
-use the following to bypass the error pyodbc being missed
+pyinstaller --onefile --console --name install ^
+  --hidden-import task_scheduler ^
+  install.py
 
-pyinstaller --onefile --console --name kra_checker --hidden-import pyodbc --hidden-import googleapiclient --hidden-import google.auth --hidden-import google.oauth2.service_account kra_auto_checker.py
+pyinstaller --onefile --console --name install --hidden-import task_scheduler --hidden-import anydesk_detector --hidden-import fetch_station_info --hidden-import config_loader install.py
 
-pyinstaller --onefile --console --name heartbeat_monitor --hidden-import pyodbc --hidden-import googleapiclient --hidden-import google.auth --hidden-import google.oauth2.service_account heartbeat_monitor.py
+Press Ctrl+Shift+P
+Type Convert Indentation to Spaces
+Press Enter
+Save the file
+
+pyinstaller --onefile --console --name uninstall uninstall.py
+
+use the following to bypass the error pyodbc being missed or issues with imports, especially when rebuilding the exes
+
+pyinstaller --onefile --console --name heartbeat_monitor ^
+  --hidden-import pyodbc ^
+  --hidden-import googleapiclient ^
+  --hidden-import googleapiclient.http ^
+  --hidden-import google.auth ^
+  --hidden-import google.oauth2.service_account ^
+  --hidden-import config_loader ^
+  --hidden-import task_scheduler ^
+  --hidden-import packaging ^
+  heartbeat_monitor.py
+
+pyinstaller --onefile --console --name kra_checker ^
+  --hidden-import pyodbc ^
+  --hidden-import googleapiclient ^
+  --hidden-import googleapiclient.http ^
+  --hidden-import google.auth ^
+  --hidden-import google.oauth2.service_account ^
+  --hidden-import config_loader ^
+  --hidden-import packaging ^
+  kra_auto_checker.py
 
 ```
 
@@ -21,6 +58,7 @@ KRA_Installer/
 ├── kra_checker.exe          ← from dist/
 ├── heartbeat_monitor.exe    ← from dist/
 ├── install.exe
+├── uninstall.exe
 ├── config.json              ← leave station_name and anydesk_code blank
 ├── credentials.json         ← your Google service account key
 ├── anydesk_detector.py
