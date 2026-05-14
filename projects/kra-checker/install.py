@@ -287,16 +287,6 @@ def main():
     kra_vbs       = os.path.join(INSTALL_DIR, "run_kra_checker.vbs")
     heartbeat_vbs = os.path.join(INSTALL_DIR, "run_heartbeat.vbs")
 
-    # for vbs_path, exe_path in [(kra_vbs, kra_exe), (heartbeat_vbs, heartbeat_exe)]:
-    #     with open(vbs_path, "w") as _vf:
-    #         # Set working directory so the exe finds config.json and credentials.json
-    #         _vf.write(
-    #             f'Dim sh\n'
-    #             f'Set sh = CreateObject("WScript.Shell")\n'
-    #             f'sh.CurrentDirectory = "{INSTALL_DIR}"\n'
-    #             f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
-    #         )
-
     task_scheduler.create_vbs_launcher(
         kra_vbs,
         kra_exe,
@@ -322,69 +312,6 @@ def main():
     print(f"  Heartbeat interval : every {heartbeat_interval} min")
     print(f"  KRA check time     : {kra_check_time}")
 
-    # print("\nWindows Task Scheduler Authentication")
-    # print("Enter the CURRENT Windows account credentials")
-    # print("These are required so tasks can run even when logged out.\n")
-
-    # print("\nNOTE:")
-    # print("Enter your actual Windows account PASSWORD.")
-    # print("Do NOT enter your Windows PIN.")
-    # print("The password will not be visible while typing.\n")
-
-    # windows_user = subprocess.check_output(
-    #     "whoami",
-    #     shell=True,
-    #     text=True
-    # ).strip()
-
-    # print(f"Detected Windows user: {windows_user}")
-    # # This prevents: # silent scheduler failure # broken unattended execution # partial installation success # confusing post-install issues # Very important for reliability.
-    # while True:
-
-    #     windows_pass = getpass.getpass(
-    #         "Windows Password (input hidden): "
-    #     ).strip()
-
-    #     if not windows_pass:
-    #         print("\n[ERROR] Windows password cannot be blank.")
-    #         print("Scheduled tasks require the current account password.\n")
-    #         continue
-
-    #     # Validate credentials using a temporary test task
-    #     test_cmd = (
-    #         f'schtasks /create '
-    #         f'/tn "KRA_TEST_TASK" '
-    #         f'/tr "cmd.exe /c exit" '
-    #         f'/sc once /st 23:59 '
-    #         f'/f '
-    #         f'/ru "{windows_user}" '
-    #         f'/rp "{windows_pass}"'
-    #     )
-
-    #     test_result = subprocess.run(
-    #         test_cmd,
-    #         shell=True,
-    #         capture_output=True,
-    #         text=True
-    #     )
-
-    #     if test_result.returncode == 0:
-
-    #         # Cleanup temporary validation task
-    #         subprocess.run(
-    #             'schtasks /delete /tn "KRA_TEST_TASK" /f',
-    #             shell=True,
-    #             capture_output=True
-    #         )
-
-    #         print("\n[OK] Windows credentials verified.\n")
-    #         break
-
-    #     else:
-    #         print("\n[ERROR] Invalid Windows password or insufficient permissions.\n")
-    #         print(test_result.stderr)
-
-
 
     tasks = [
         ("KRA Auto Checker",  f'wscript.exe "{kra_vbs}"',       f"/sc daily /st {kra_check_time}"),
@@ -399,73 +326,6 @@ def main():
         if not ok:
             print(f"  ERROR creating '{task_name}'")
 
-
-        # subprocess.run(f'schtasks /delete /tn "{task_name}" /f', shell=True, capture_output=True)
-        
-        # # This alone fixes: # run while locked # run while logged out # unattended execution # reboot persistence
-        # result = subprocess.run(
-        # f'schtasks /create '
-        # f'/tn "{task_name}" '
-        # f'/tr "{task_cmd}" '
-        # f'{schedule} '
-        # f'/f '
-        # f'/rl highest '
-        # f'/ru "{windows_user}" '
-        # f'/rp "{windows_pass}"',
-        # shell=True,
-        # capture_output=True,
-        # text=True
-        # )
-        
-        # if result.returncode == 0:
-        #     # schtasks.exe cannot configure ALL advanced settings directly.
-        #     # stop existing instance # battery conditions # missed task handling
-        #     # So we use PowerShell immediately AFTER creation.
-        #     # THIS FIXES:
-        #     # Power issues
-
-        #     # Disables: # “Start only on AC” # “Stop on battery”
-        #     # Missed schedule recovery # Enables: # Run task as soon as possible after missed start
-        #     # Hung process recovery # Sets: # Stop existing instance # This is VERY important.
-            
-        #     settings_cmd = (
-        #         f'powershell -Command '
-        #         f'"$settings = New-ScheduledTaskSettingsSet '
-        #         f'-AllowStartIfOnBatteries '
-        #         f'-DontStopIfGoingOnBatteries '
-        #         f'-StartWhenAvailable '
-        #         f'-WakeToRun '
-        #         f'-MultipleInstances IgnoreNew '
-        #         f'-ExecutionTimeLimit (New-TimeSpan -Days 0); '
-
-        #         f'Set-ScheduledTask '
-        #         f'-TaskName \'{task_name}\' '
-        #         f'-Settings $settings '
-        #         f'-User "{windows_user}" '
-        #         f'-Password "{windows_pass}""'
-        #     )
-
-        #     settings_result = subprocess.run(
-        #         settings_cmd,
-        #         shell=True,
-        #         capture_output=True,
-        #         text=True
-        #     )
-
-        #     if settings_result.returncode != 0:
-        #         print("Failed to update task settings")
-        #         print(settings_result.stderr)
-        #     else:
-        #         print(f"  Updated settings: {task_name}")
-
-        #     # Check if tasks are actually created
-        #     # print(settings_result.stdout)
-        #     # print(settings_result.stderr)
-
-        #     print(f"  Created: {task_name}")
-
-        # else:
-        #     print(f"  ERROR creating '{task_name}': {result.stderr.strip()}")
 
     print("\n  Verifying installation:")
     for f in ["kra_checker.exe", "heartbeat_monitor.exe", "credentials.json", "config.json"]:

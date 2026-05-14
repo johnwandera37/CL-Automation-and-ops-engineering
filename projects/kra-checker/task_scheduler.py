@@ -33,35 +33,6 @@ def apply_advanced_task_settings(task_name, log=None):
     # Hung process recovery # Sets: # Stop existing instance # This is VERY important.
     """
 
-    # settings_cmd = (
-    #     f'powershell -Command '
-    #     f'"$settings = New-ScheduledTaskSettingsSet '
-    #     f'-AllowStartIfOnBatteries '
-    #     f'-DontStopIfGoingOnBatteries '
-    #     f'-StartWhenAvailable '
-    #     f'-WakeToRun '
-    #     f'-MultipleInstances IgnoreNew '
-    #     f'-ExecutionTimeLimit (New-TimeSpan -Days 0); '
-
-    #     f'Set-ScheduledTask '
-    #     f'-TaskName \'{task_name}\' '
-    #     f'-Settings $settings '
-    #     f'-User "{windows_user}" '
-    #     f'-Password "{windows_pass}""'
-    # )
-
-    # settings_cmd = (
-    #     f'powershell -Command "'
-    #     f'$settings = New-ScheduledTaskSettingsSet '
-    #     f'-AllowStartIfOnBatteries '
-    #     f'-DontStopIfGoingOnBatteries '
-    #     f'-StartWhenAvailable '
-    #     f'-WakeToRun '
-    #     f'-MultipleInstances IgnoreNew '
-    #     f'-ExecutionTimeLimit (New-TimeSpan -Days 0); '
-    #     f'Set-ScheduledTask -TaskName \'{task_name}\' -Settings $settings"'
-    # )
-
     settings_cmd = (
         f'powershell -Command "'
         f'$settings = New-ScheduledTaskSettingsSet '
@@ -125,18 +96,6 @@ def create_or_update_task(
         capture_output=True
     )
 
-    # This alone fixes: # run while locked # run while logged out # unattended execution # reboot persistence
-    # create_cmd = (
-    #     f'schtasks /create '
-    #     f'/tn "{task_name}" '
-    #     f'/tr "{task_cmd}" '
-    #     f'{schedule} '
-    #     f'/f '
-    #     f'/rl highest ',
-    #     f'/ru "{windows_user}" '
-    #     f'/rp "{windows_pass}"'
-    # )
-
     create_cmd = (
     f'schtasks /create '
     f'/tn "{task_name}" '
@@ -190,18 +149,6 @@ def change_heartbeat_interval(interval_minutes, log=None):
     - hidden settings
     """
 
-    # cmd = (
-    #     f'schtasks /change '
-    #     f'/tn "Station Heartbeat" '
-    #     f'/mo {interval_minutes}'
-    # )
-
-    # ps_cmd = (
-    #     'powershell -Command '
-    #     f'"$task = Get-ScheduledTask -TaskName \'Station Heartbeat\'; '
-    #     f'$task.Triggers[0].Repetition.Interval = \'PT{interval_minutes}M\'; '
-    #     f'Set-ScheduledTask -InputObject $task"'
-    # )
 
     ps_cmd = (
         'powershell -Command "'
@@ -239,20 +186,6 @@ def change_kra_schedule_time(kra_check_time, log=None):
     """
     Change KRA checker schedule time WITHOUT recreating task.
     """
-
-    # cmd = (
-    #     f'schtasks /change '
-    #     f'/tn "KRA Auto Checker" '
-    #     f'/st {kra_check_time}'
-    # )
-
-    # ps_cmd = (
-    # 'powershell -Command '
-    # f'"$task = Get-ScheduledTask -TaskName \'KRA Auto Checker\'; '
-    # f'$task.Triggers[0].StartBoundary = '
-    # f'\'2026-01-01T{kra_check_time}:00\'; '
-    # f'Set-ScheduledTask -InputObject $task"'
-    # )
 
     ps_cmd = (
         'powershell -Command "'

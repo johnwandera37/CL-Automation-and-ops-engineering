@@ -582,56 +582,6 @@ def sync_scheduled_tasks(config: ConfigLoader, log):
     # investigate WHY module-level import disappeared.
     import subprocess, json
 
-    # heartbeat_interval = int(config.get("heartbeat_interval", 30))
-    # kra_check_time     = config.get("kra_check_time", "19:00")
-    # install_dir        = os.path.dirname(os.path.abspath(sys.argv[0]))
-    # kra_exe            = os.path.join(install_dir, "kra_checker.exe")
-    # heartbeat_exe      = os.path.join(install_dir, "heartbeat_monitor.exe")
-    # kra_vbs            = os.path.join(install_dir, "run_kra_checker.vbs")
-    # heartbeat_vbs      = os.path.join(install_dir, "run_heartbeat.vbs")
-    # config_path        = os.path.join(install_dir, "config.json")
-
-    # Recreate VBS launchers if missing
-    # for vbs, exe in [(kra_vbs, kra_exe), (heartbeat_vbs, heartbeat_exe)]:
-    #     if not os.path.exists(vbs):
-            # with open(vbs, "w") as f:
-            #     f.write(
-            #         f'Dim sh\nSet sh = CreateObject("WScript.Shell")\n'
-            #         f'sh.CurrentDirectory = "{install_dir}"\n'
-            #         f'sh.Run Chr(34) & "{exe}" & Chr(34), 0, False\n'
-            #     )
-
-    # def _run_schtask(cmd):
-    #     r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    #     if r.returncode == 0:
-    #         return True
-    #     ps = f'powershell -Command "Start-Process cmd -ArgumentList \'/c {cmd}\' -Verb RunAs -Wait"'
-    #     return subprocess.run(ps, shell=True, capture_output=True).returncode == 0
-
-    # def _create_heartbeat_task():
-    #     subprocess.run('schtasks /delete /tn "Station Heartbeat" /f',
-    #                    shell=True, capture_output=True)
-    #     cmd = (f'schtasks /create /tn "Station Heartbeat" '
-    #            f'/tr "wscript.exe \\"{heartbeat_vbs}\\"" '
-    #            f'/sc minute /mo {heartbeat_interval} /f /rl highest')
-    #     if _run_schtask(cmd):
-    #         log.info(f"[TASKS] Station Heartbeat set to every {heartbeat_interval} min")
-    #         return True
-    #     log.warning("[TASKS] Could not update heartbeat task")
-    #     return False
-
-    # def _create_kra_task():
-    #     subprocess.run('schtasks /delete /tn "KRA Auto Checker" /f',
-    #                    shell=True, capture_output=True)
-    #     cmd = (f'schtasks /create /tn "KRA Auto Checker" '
-    #            f'/tr "wscript.exe \\"{kra_vbs}\\"" '
-    #            f'/sc daily /st {kra_check_time} /f /rl highest')
-    #     if _run_schtask(cmd):
-    #         log.info(f"[TASKS] KRA Auto Checker set to run at {kra_check_time}")
-    #         return True
-    #     log.warning("[TASKS] Could not update KRA task")
-    #     return False
-
     heartbeat_interval = int(config.get("heartbeat_interval", 30))
     kra_check_time = config.get("kra_check_time", "19:00")
 
