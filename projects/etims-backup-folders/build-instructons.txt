@@ -1,0 +1,7 @@
+pip install gspread google-auth
+pyinstaller --onefile main.py
+
+Your functional program
+main.exe
+config.json
+credentials.json

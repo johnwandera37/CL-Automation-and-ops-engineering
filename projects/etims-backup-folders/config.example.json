@@ -1,0 +1,6 @@
+{
+  "spreadsheet_id": "The sheet id to write the results",
+  "credentials_file": "credentials.json, a google key for service account",
+  "base_path": "C:/Users/Craft Admin/ETIMSBackup",
+  "worksheet_name": "ETIMSBackupFolders"
+}
