@@ -1,4 +1,4 @@
-For a clean reinstallation remove the following,
+For a clean reinstallation remove the following,you can use the clean_build.bat
 REM 1. Delete ALL PyInstaller artifacts
 rd /s /q dist
 rd /s /q build

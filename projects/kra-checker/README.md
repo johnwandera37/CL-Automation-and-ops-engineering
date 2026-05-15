@@ -204,7 +204,7 @@ scheduled tasks automatically run once the machine becomes available again.
 | Sheet | Purpose | Written by |
 |---|---|---|
 | `Report` | KRA check results per station per day | kra_checker.exe |
-| `Logs` | Detailed event log for all stations | kra_checker.exe |
+| `Logs` | Detailed event log for all stations | both |
 | `Station Status` | Live connectivity dashboard | heartbeat_monitor.exe + Apps Script |
 | `Heartbeat Error Logs` | Error-level events only | heartbeat_monitor.exe |
 
@@ -375,6 +375,7 @@ Builddet/
 ├── uninstall.py
 ├── config.json
 ├── credentials.json
+├── clean_build.bat
 ├── task_scheduler
 └── requirements.txt this should be ran when setting up the program for development, testing executables snd testing python source
 ```
@@ -555,6 +556,7 @@ pyinstaller --onefile --console --name uninstall ^
 | `install.py`                | Installer source                       | No (build to exe)     |
 | `uninstall.py`              | Uninstaller source                     | No (build to exe)     |
 | `clear_sheets.py`           | Dev utility — clears monitoring sheets | No                    |
+| `clean_build.bat`           | Dev utility — Run once before a fresh build to remove all cached artifacts | No                    |
 | `station_status_monitor.gs` | Apps Script — paste into Google Sheets | No                    |
 | `config.json`               | Station config template                | Yes                   |
 | `credentials.json`          | Google service account key             | Yes                   |

@@ -68,6 +68,24 @@ class ConfigLoader:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def normalize_scheduler_time(time_str):
+        """
+        Ensure scheduler times are always HH:MM.
+
+        Examples:
+            4:00  -> 04:00
+            0:00  -> 00:00
+            21:51 -> 21:51
+        """
+
+        try:
+            hour, minute = str(time_str).strip().split(":")
+            return f"{int(hour):02d}:{int(minute):02d}"
+
+        except Exception:
+            return time_str
+
     def _build_config(self) -> Dict[str, Any]:
         local = self._load_local()
         global_cfg = self._load_global(local) if GOOGLE_AVAILABLE else {}
@@ -82,6 +100,12 @@ class ConfigLoader:
         for path_key in ("service_account_file", "retry_file"):
             if path_key in merged and not os.path.isabs(merged[path_key]):
                 merged[path_key] = os.path.join(BASE_DIR, merged[path_key])
+
+        # Normalize scheduler times
+        if "kra_check_time" in merged:
+            merged["kra_check_time"] = self.normalize_scheduler_time(
+                merged["kra_check_time"]
+            )        
 
         return merged
 
