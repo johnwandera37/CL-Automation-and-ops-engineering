@@ -4,6 +4,8 @@ credentials.json
 # KRA_Installer and Builder - no need to share
 KRA_Installer/
 Builder/
+Old Local Test/
+New Local Test/
 
 # Python cache
 __pycache__/

@@ -359,6 +359,98 @@ The system is designed to stay well within Google Sheets API limits (60 reads/wr
 
 ---
 
+
+## Auto-Update Download & Recovery Mechanism
+
+The system includes a fully automated non-blocking update engine managed by `heartbeat_monitor.exe`.
+
+When a newer version is detected in the Global Config sheet:
+
+1. Heartbeat compares local vs remote semantic versions
+2. Downloads the updated `.exe` from Google Drive
+3. Saves it temporarily as:
+
+   * `kra_checker.exe.new`
+   * `heartbeat_monitor.exe.new`
+4. Performs a safe hot-swap using a temporary batch file
+5. Renames the old executable to `.old`
+6. Renames the downloaded `.new` file to the live executable
+7. Restarts heartbeat automatically if heartbeat itself was updated
+
+### Non-Blocking Design
+
+The updater runs in a background thread and never blocks normal heartbeat execution.
+
+This means:
+
+* Station status updates continue normally
+* Heartbeat schedules remain accurate
+* Long downloads do not interrupt monitoring
+* Slow internet connections do not freeze the main program
+
+### Download Protection & Recovery
+
+To prevent corrupted or duplicate updates, the updater uses temporary lock files:
+
+```text
+.downloading_kra_checker
+.downloading_heartbeat_monitor
+```
+
+These files exist only while a download is actively running.
+
+### Interrupted Download Recovery
+
+The updater automatically recovers from:
+
+* Power loss
+* Windows restart
+* Internet disconnection
+* Interrupted downloads
+* Partially downloaded `.new` files
+* Duplicate update attempts across heartbeat cycles
+
+If a stale `.new` file is detected:
+
+* The system checks whether the file size is still growing
+* Active downloads are left untouched
+* Stalled downloads are deleted automatically
+* The update retries during the next heartbeat cycle
+
+### Safe Update Ordering
+
+Updates are always processed in this order:
+
+1. `kra_checker.exe`
+2. `heartbeat_monitor.exe`
+
+This ensures the updater itself (`heartbeat_monitor.exe`) is replaced last, preventing interruption of other updates.
+
+### Validation Checks
+
+Downloaded executables are validated before swapping:
+
+* Empty or suspiciously small downloads are rejected
+* Failed downloads are logged
+* Existing executables remain untouched if validation fails
+
+### Temporary Update Files
+
+During updates, the install folder may temporarily contain:
+
+```text
+kra_checker.exe.new
+heartbeat_monitor.exe.new
+kra_checker.exe.old
+heartbeat_monitor.exe.old
+apply_update.bat
+apply_kra_update.bat
+```
+
+These are normal and are cleaned automatically after successful updates.
+
+
+
 ## Deployment
 
 ### Folder Structure

@@ -42,292 +42,23 @@ _hide_console()
 # Auto-updater — heartbeat manages updates for BOTH exes
 # ─────────────────────────────────────────────────────────────────────────────
 
-# def _run_updates():
-#     """
-#     Runs in a background thread with 60s timeout so it never blocks heartbeat.
-#     Checks kra_checker.exe first (safe — not running), heartbeat last (causes restart).
-#     """
-#     import threading
-#     t = threading.Thread(target=_update_logic, daemon=False) # non-daemon
-#     t.start()
-#     t.join(timeout=300)  # wait up to 5 minutes
-#     if t.is_alive():
-#         logging.getLogger(__name__).warning("[UPDATER] Download taking too long — will continue in background")
-#         # Thread keeps running even after main exits since daemon=False
-
-# The following is outdated new function
-# def _run_updates():
-#     """
-#     Fire-and-forget updater. Never blocks the heartbeat.
-#     Uses lock files to prevent duplicate downloads across heartbeat cycles.
-#     """
-#     import threading
-
-#     base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-
-#     # Clean up stale lock files on startup (e.g. after reboot mid-download)
-#     for label in ("kra_checker", "heartbeat_monitor"):
-#         lock_file = os.path.join(base_dir, f".downloading_{label}")
-#         new_file  = os.path.join(base_dir, f"{label.replace('_', '_')}.exe.new")
-#         if os.path.exists(lock_file):
-#             # Check if .new file is stale (not modified in 30 minutes)
-#             import time
-#             new_exe_name = "kra_checker.exe.new" if label == "kra_checker" else "heartbeat_monitor.exe.new"
-#             new_path = os.path.join(base_dir, new_exe_name)
-#             if os.path.exists(new_path):
-#                 age = time.time() - os.path.getmtime(new_path)
-#                 if age > 1800:  # 30 minutes
-#                     os.remove(lock_file)
-#                     os.remove(new_path)
-#                     logging.getLogger(__name__).info(f"[UPDATER] Cleared stale download for {label}")
-#             else:
-#                 # Lock file exists but no .new file — orphaned lock
-#                 os.remove(lock_file)
-
-#     # Start update logic in a non-daemon thread
-#     # Non-daemon means the process stays alive until this thread finishes
-#     t = threading.Thread(target=_update_logic, daemon=False)
-#     t.start()
-#     # Do NOT join — heartbeat continues immediately, thread runs independently
-
 def _run_updates():
     """
-    Fire-and-forget updater. Never blocks the heartbeat.
-    Uses lock files to prevent duplicate downloads across heartbeat cycles.
+    Runs in a background thread with 60s timeout so it never blocks heartbeat.
+    Checks kra_checker.exe first (safe — not running), heartbeat last (causes restart).
     """
     import threading
-    import time
-
-    base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-    logger   = logging.getLogger(__name__)
-
-    # ── Cleanup: handle orphaned/stale .new files ─────────────────────
-    for label in ("kra_checker", "heartbeat_monitor"):
-        lock_file    = os.path.join(base_dir, f".downloading_{label}")
-        exe_name     = "kra_checker.exe" if label == "kra_checker" else "heartbeat_monitor.exe"
-        new_path     = os.path.join(base_dir, exe_name + ".new")
-
-        if os.path.exists(lock_file):
-            # Lock exists — check if .new file is present
-            if os.path.exists(new_path):
-                # Check if size is still growing (active download)
-                size_before = os.path.getsize(new_path)
-                time.sleep(10)
-                size_after = os.path.getsize(new_path)
-                if size_before == size_after:
-                    # Not growing — stalled or interrupted, clean up
-                    os.remove(lock_file)
-                    os.remove(new_path)
-                    logger.info(f"[UPDATER] Cleared stalled download for {label}")
-                else:
-                    # Still growing — active download, leave it alone
-                    logger.info(f"[UPDATER] {label} download is active — leaving it alone")
-            else:
-                # Lock exists but no .new file — orphaned lock only
-                os.remove(lock_file)
-                logger.info(f"[UPDATER] Cleared orphaned lock for {label}")
-
-        elif os.path.exists(new_path):
-            # No lock file but .new file exists — interrupted without lock cleanup
-            size_before = os.path.getsize(new_path)
-            time.sleep(3)
-            size_after = os.path.getsize(new_path)
-            if size_before == size_after:
-                os.remove(new_path)
-                logger.info(f"[UPDATER] Removed stalled .new file for {label} — will retry")
-            else:
-                logger.info(f"[UPDATER] {label} download is active — leaving it alone")
-
-    # ── Start update logic in a non-daemon thread ─────────────────────
-    # Non-daemon means the process stays alive until this thread finishes
-    t = threading.Thread(target=_update_logic, daemon=False)
+    t = threading.Thread(target=_update_logic, daemon=False) # non-daemon
     t.start()
-    # Do NOT join — heartbeat continues immediately, thread runs independently
-
-
-# def _update_logic():
-#     import json, io, subprocess, datetime as dt
-#     logger = logging.getLogger(__name__)
-#     try:
-#         from packaging import version as semver
-#         from config_loader import ConfigLoader
-#         from googleapiclient.discovery import build as gbuild
-#         from googleapiclient.http import MediaIoBaseDownload
-#         from google.oauth2 import service_account as gsa
-
-#         config     = ConfigLoader()
-#         base_dir   = os.path.dirname(os.path.abspath(sys.argv[0]))
-#         creds_file = os.path.join(base_dir, "credentials.json")
-
-#         creds_drive = gsa.Credentials.from_service_account_file(
-#             creds_file, scopes=["https://www.googleapis.com/auth/drive.readonly"]
-#         )
-#         drive_svc = gbuild("drive", "v3", credentials=creds_drive)
-
-#         creds_sheets = gsa.Credentials.from_service_account_file(
-#             creds_file, scopes=["https://www.googleapis.com/auth/spreadsheets"]
-#         )
-#         sheets_svc = gbuild("sheets", "v4", credentials=creds_sheets)
-
-#         def _log_update(label, local_ver, remote_ver, success=True):
-#             try:
-#                 sheets_svc.spreadsheets().values().append(
-#                     spreadsheetId=config.get("spreadsheet_id"),
-#                     range="Logs!A:E",
-#                     valueInputOption="RAW",
-#                     insertDataOption="INSERT_ROWS",
-#                     body={"values": [[
-#                         dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-#                         config.get("station_name", ""),
-#                         config.get("anydesk_code", ""),
-#                         "🔄 UPDATE",
-#                         f"Auto-updated {label} from v{local_ver} to v{remote_ver}"
-#                     ]]}
-#                 ).execute()
-#             except Exception:
-#                 pass
-#             try:
-#                 helper_id  = config.get("automation_helper_sheet_id")
-#                 anydesk    = str(config.get("anydesk_code", "")).strip()
-#                 timestamp  = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-#                 status_val = f"✅ v{remote_ver}" if success else "🔴 Failed"
-#                 rows = sheets_svc.spreadsheets().values().get(
-#                     spreadsheetId=helper_id, range="Station Mapping!A:B"
-#                 ).execute().get("values", [])
-#                 row_num = None
-#                 for i, row in enumerate(rows):
-#                     if len(row) >= 2 and str(row[1]).strip() == anydesk:
-#                         row_num = i + 1
-#                         break
-#                 if row_num:
-#                     col_range = f"Station Mapping!D{row_num}:E{row_num}" if label == "kra_checker" \
-#                                 else f"Station Mapping!F{row_num}:G{row_num}"
-#                     sheets_svc.spreadsheets().values().update(
-#                         spreadsheetId=helper_id,
-#                         range=col_range,
-#                         valueInputOption="RAW",
-#                         body={"values": [[status_val, timestamp]]}
-#                     ).execute()
-#             except Exception:
-#                 pass
-
-#         def _download_exe(drive_id, dest_path):
-#             request    = drive_svc.files().get_media(fileId=drive_id)
-#             fh         = io.FileIO(dest_path, "wb")
-#             downloader = MediaIoBaseDownload(fh, request, chunksize=65536 * 16)
-#             done = False
-#             while not done:
-#                 status, done = downloader.next_chunk()
-#                 if status:
-#                     logger.info(f"[UPDATER] {int(status.progress() * 100)}%")
-#             fh.close()
-#             return os.path.getsize(dest_path)
-
-#         def _write_version(key, value):
-#             try:
-#                 p = os.path.join(base_dir, "config.json")
-#                 with open(p) as f:
-#                     cfg = json.load(f)
-#                 cfg[key] = value
-#                 with open(p, "w") as f:
-#                     json.dump(cfg, f, indent=2)
-#             except Exception as e:
-#                 logger.warning(f"[UPDATER] Could not write version: {e}")
-
-#         def _swap_bat(exe_path, new_exe, backup_exe, restart=False):
-#             name     = "apply_update.bat" if restart else "apply_kra_update.bat"
-#             bat_path = os.path.join(base_dir, name)
-#             lines    = [
-#                 "@echo off", "timeout /t 2 >nul",
-#                 f'if exist "{backup_exe}" del /f /q "{backup_exe}"',
-#                 f'if exist "{exe_path}" ren "{exe_path}" "{os.path.basename(backup_exe)}"',
-#                 f'ren "{new_exe}" "{os.path.basename(exe_path)}"',
-#             ]
-#             if restart:
-#                 lines.append(f'start "" "{exe_path}"')
-#             lines += ['del /f /q "%~f0"', "exit"]
-#             with open(bat_path, "w") as f:
-#                 f.write("\r\n".join(lines) + "\r\n")
-#             return bat_path
-
-#         exes = [
-#             {"label": "kra_checker",       "exe": "kra_checker.exe",
-#              "lkey": "current_version_kra",        "rkey": "remote_version_kra",
-#              "dkey": "kra_checker_drive_id",        "self": False},
-#             {"label": "heartbeat_monitor",  "exe": "heartbeat_monitor.exe",
-#              "lkey": "current_version_heartbeat",   "rkey": "remote_version_heartbeat",
-#              "dkey": "heartbeat_monitor_drive_id",   "self": True},
-#         ]
-
-#         hb_restart = False
-#         hb_exe_path = hb_new = hb_backup = None
-
-#         for exe in exes:
-#             local_ver  = config.get(exe["lkey"], "0.0.0")
-#             remote_ver = config.get(exe["rkey"], "0.0.0")
-#             drive_id   = config.get(exe["dkey"])
-#             logger.info(f"[UPDATER] {exe['label']}  local={local_ver}  remote={remote_ver}")
-
-#             if not drive_id or semver.parse(remote_ver) <= semver.parse(local_ver):
-#                 logger.info(f"[UPDATER] {exe['label']} up to date")
-#                 continue
-
-#             logger.info(f"[UPDATER] Updating {exe['label']} ({local_ver} -> {remote_ver})")
-#             exe_path   = os.path.join(base_dir, exe["exe"])
-#             new_exe    = exe_path + ".new"
-#             backup_exe = exe_path + ".old"
-
-#             # If .new file already exists and was modified recently (within 10 min),
-#             # a previous thread is still downloading — skip to avoid restarting it
-#             import time
-#             if os.path.exists(new_exe):
-#                 age_seconds = time.time() - os.path.getmtime(new_exe)
-#                 if age_seconds < 600:  # 10 minutes
-#                     logger.info(f"[UPDATER] {exe['label']} download already in progress ({age_seconds:.0f}s old) — skipping")
-#                     continue
-#                 else:
-#                     logger.info(f"[UPDATER] Stale .new file found — restarting download")
-#                     os.remove(new_exe)
-
-#             size = _download_exe(drive_id, new_exe)
-#             size_mb = size / (1024 * 1024)
-#             logger.info(f"[UPDATER] Downloaded {size_mb:.1f} MB")
-
-#             if size < 10 * 1024 * 1024:
-#                 logger.error(f"[UPDATER] Too small ({size_mb:.1f} MB) — aborting")
-#                 if os.path.exists(new_exe):
-#                     os.remove(new_exe)
-#                 _log_update(exe["label"], local_ver, remote_ver, success=False)
-#                 continue
-
-#             _write_version(exe["lkey"], remote_ver)
-#             _log_update(exe["label"], local_ver, remote_ver, success=True)
-
-#             if exe["self"]:
-#                 hb_restart  = True
-#                 hb_exe_path = exe_path
-#                 hb_new      = new_exe
-#                 hb_backup   = backup_exe
-#             else:
-#                 bat = _swap_bat(exe_path, new_exe, backup_exe, restart=False)
-#                 subprocess.Popen(["cmd", "/c", bat], creationflags=subprocess.CREATE_NO_WINDOW)
-#                 logger.info("[UPDATER] kra_checker.exe swap launched")
-
-#         if hb_restart and hb_exe_path:
-#             bat = _swap_bat(hb_exe_path, hb_new, hb_backup, restart=True)
-#             subprocess.Popen(["cmd", "/c", bat], creationflags=subprocess.CREATE_NO_WINDOW)
-#             logger.info("[UPDATER] Heartbeat hot-swap launched — restarting")
-#             sys.exit(0)
-
-#     except Exception as e:
-#         logging.getLogger(__name__).warning(f"[UPDATER] Skipped: {e}")
+    t.join(timeout=300)  # wait up to 5 minutes
+    if t.is_alive():
+        logging.getLogger(__name__).warning("[UPDATER] Download taking too long — will continue in background")
+        # Thread keeps running even after main exits since daemon=False
 
 
 def _update_logic():
-    import json, io, subprocess, datetime as dt, time
+    import json, io, subprocess, datetime as dt
     logger = logging.getLogger(__name__)
-    base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-
     try:
         from packaging import version as semver
         from config_loader import ConfigLoader
@@ -336,6 +67,7 @@ def _update_logic():
         from google.oauth2 import service_account as gsa
 
         config     = ConfigLoader()
+        base_dir   = os.path.dirname(os.path.abspath(sys.argv[0]))
         creds_file = os.path.join(base_dir, "credentials.json")
 
         creds_drive = gsa.Credentials.from_service_account_file(
@@ -430,99 +162,77 @@ def _update_logic():
             return bat_path
 
         exes = [
-            {"label": "kra_checker",      "exe": "kra_checker.exe",
-             "lkey": "current_version_kra",       "rkey": "remote_version_kra",
-             "dkey": "kra_checker_drive_id",       "self": False},
-            {"label": "heartbeat_monitor", "exe": "heartbeat_monitor.exe",
-             "lkey": "current_version_heartbeat",  "rkey": "remote_version_heartbeat",
-             "dkey": "heartbeat_monitor_drive_id",  "self": True},
+            {"label": "kra_checker",       "exe": "kra_checker.exe",
+             "lkey": "current_version_kra",        "rkey": "remote_version_kra",
+             "dkey": "kra_checker_drive_id",        "self": False},
+            {"label": "heartbeat_monitor",  "exe": "heartbeat_monitor.exe",
+             "lkey": "current_version_heartbeat",   "rkey": "remote_version_heartbeat",
+             "dkey": "heartbeat_monitor_drive_id",   "self": True},
         ]
 
-        hb_restart  = False
+        hb_restart = False
         hb_exe_path = hb_new = hb_backup = None
 
         for exe in exes:
             local_ver  = config.get(exe["lkey"], "0.0.0")
             remote_ver = config.get(exe["rkey"], "0.0.0")
             drive_id   = config.get(exe["dkey"])
-            label      = exe["label"]
-
-            logger.info(f"[UPDATER] {label}  local={local_ver}  remote={remote_ver}")
+            logger.info(f"[UPDATER] {exe['label']}  local={local_ver}  remote={remote_ver}")
 
             if not drive_id or semver.parse(remote_ver) <= semver.parse(local_ver):
-                logger.info(f"[UPDATER] {label} up to date")
+                logger.info(f"[UPDATER] {exe['label']} up to date")
                 continue
 
-            # ── Lock file check ───────────────────────────────────────
-            lock_file = os.path.join(base_dir, f".downloading_{label}")
-
-            if os.path.exists(lock_file):
-                logger.info(f"[UPDATER] {label} download already in progress — skipping")
-                continue
-
-            # ── Start download ────────────────────────────────────────
+            logger.info(f"[UPDATER] Updating {exe['label']} ({local_ver} -> {remote_ver})")
             exe_path   = os.path.join(base_dir, exe["exe"])
             new_exe    = exe_path + ".new"
             backup_exe = exe_path + ".old"
 
-            # Write lock file before starting
-            with open(lock_file, "w") as f:
-                f.write(dt.datetime.now().isoformat())
-
-            logger.info(f"[UPDATER] Downloading {label} ({local_ver} -> {remote_ver})...")
-
-            try:
-                size    = _download_exe(drive_id, new_exe)
-                size_mb = size / (1024 * 1024)
-                logger.info(f"[UPDATER] Downloaded {size_mb:.1f} MB")
-
-                if size < 10 * 1024 * 1024:
-                    logger.error(f"[UPDATER] {label} too small ({size_mb:.1f} MB) — aborting")
-                    if os.path.exists(new_exe):
-                        os.remove(new_exe)
-                    _log_update(label, local_ver, remote_ver, success=False)
+            # If .new file already exists and was modified recently (within 10 min),
+            # a previous thread is still downloading — skip to avoid restarting it
+            import time
+            if os.path.exists(new_exe):
+                age_seconds = time.time() - os.path.getmtime(new_exe)
+                if age_seconds < 600:  # 10 minutes
+                    logger.info(f"[UPDATER] {exe['label']} download already in progress ({age_seconds:.0f}s old) — skipping")
                     continue
-
-                _write_version(exe["lkey"], remote_ver)
-                _log_update(label, local_ver, remote_ver, success=True)
-
-                if exe["self"]:
-                    hb_restart  = True
-                    hb_exe_path = exe_path
-                    hb_new      = new_exe
-                    hb_backup   = backup_exe
                 else:
-                    bat = _swap_bat(exe_path, new_exe, backup_exe, restart=False)
-                    subprocess.Popen(
-                        ["cmd", "/c", bat],
-                        creationflags=subprocess.CREATE_NO_WINDOW
-                    )
-                    logger.info(f"[UPDATER] {label} swap launched")
+                    logger.info(f"[UPDATER] Stale .new file found — restarting download")
+                    os.remove(new_exe)
 
-            finally:
-                # Always remove lock file when done (success or failure)
-                if os.path.exists(lock_file):
-                    os.remove(lock_file)
+            size = _download_exe(drive_id, new_exe)
+            size_mb = size / (1024 * 1024)
+            logger.info(f"[UPDATER] Downloaded {size_mb:.1f} MB")
+
+            if size < 10 * 1024 * 1024:
+                logger.error(f"[UPDATER] Too small ({size_mb:.1f} MB) — aborting")
+                if os.path.exists(new_exe):
+                    os.remove(new_exe)
+                _log_update(exe["label"], local_ver, remote_ver, success=False)
+                continue
+
+            _write_version(exe["lkey"], remote_ver)
+            _log_update(exe["label"], local_ver, remote_ver, success=True)
+
+            if exe["self"]:
+                hb_restart  = True
+                hb_exe_path = exe_path
+                hb_new      = new_exe
+                hb_backup   = backup_exe
+            else:
+                bat = _swap_bat(exe_path, new_exe, backup_exe, restart=False)
+                subprocess.Popen(["cmd", "/c", bat], creationflags=subprocess.CREATE_NO_WINDOW)
+                logger.info("[UPDATER] kra_checker.exe swap launched")
 
         if hb_restart and hb_exe_path:
             bat = _swap_bat(hb_exe_path, hb_new, hb_backup, restart=True)
-            subprocess.Popen(
-                ["cmd", "/c", bat],
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            subprocess.Popen(["cmd", "/c", bat], creationflags=subprocess.CREATE_NO_WINDOW)
             logger.info("[UPDATER] Heartbeat hot-swap launched — restarting")
             sys.exit(0)
 
     except Exception as e:
         logging.getLogger(__name__).warning(f"[UPDATER] Skipped: {e}")
-        # Clean up any lock files left behind by an unexpected error
-        for label in ("kra_checker", "heartbeat_monitor"):
-            lock_file = os.path.join(
-                os.path.dirname(os.path.abspath(sys.argv[0])),
-                f".downloading_{label}"
-            )
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
+
 
 _run_updates()
 

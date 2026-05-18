@@ -201,7 +201,7 @@ def change_kra_schedule_time(kra_check_time, log=None):
         text=True
     )
 
-    if result.returncode != 0:
+    if result.returncode != 0 or result.stderr.strip():
 
         if log:
             log.warning("[TASKS] Failed changing KRA schedule")
