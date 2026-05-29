@@ -4,22 +4,6 @@ import json
 import subprocess
 
 
-# def create_vbs_launcher(vbs_path, exe_path, working_dir):
-#     """
-#     Create hidden VBS launcher.
-#     """
-#     with open(vbs_path, "w") as f:
-#         # f.write(
-#         #     f'Dim sh\n'
-#         #     f'Set sh = CreateObject("WScript.Shell")\n'
-#         #     f'sh.CurrentDirectory = "{working_dir}"\n'
-#         #     f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
-#         # )
-#         f.write(
-#             'Set sh = CreateObject("WScript.Shell")\n'
-#             f'sh.CurrentDirectory = "{working_dir}"\n'
-#             f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
-#         )
 
 def create_vbs_launcher(bat_path, exe_path, working_dir):
     """
