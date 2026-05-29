@@ -1,6 +1,6 @@
 """
 Station Heartbeat Monitor  v2.1
-Runs on schedule via Windows Task Scheduler (called via VBS launcher).
+Runs on schedule via Windows Task Scheduler (called via BAT launcher).
   - Checks internet, SQL Server, disk space, local IP
   - Writes station status to Google Sheets (Station Status tab)
   - Manages auto-updates for BOTH heartbeat_monitor.exe and kra_checker.exe

@@ -284,19 +284,34 @@ def main():
     # Create silent VBS launchers — Task Scheduler calls these
     # so the exe starts with zero visible window
 
-    kra_vbs       = os.path.join(INSTALL_DIR, "run_kra_checker.vbs")
-    heartbeat_vbs = os.path.join(INSTALL_DIR, "run_heartbeat.vbs")
+    # kra_vbs       = os.path.join(INSTALL_DIR, "run_kra_checker.vbs")
+    # heartbeat_vbs = os.path.join(INSTALL_DIR, "run_heartbeat.vbs")
+
+    kra_bat       = os.path.join(INSTALL_DIR, "run_kra_checker.bat")
+    heartbeat_bat = os.path.join(INSTALL_DIR, "run_heartbeat.bat")
+
+    # task_scheduler.create_vbs_launcher(
+    #     kra_vbs,
+    #     kra_exe,
+    #     INSTALL_DIR
+    # )
 
     task_scheduler.create_vbs_launcher(
-        kra_vbs,
-        kra_exe,
-        INSTALL_DIR
+    kra_bat,
+    kra_exe,
+    INSTALL_DIR
     )
 
+    # task_scheduler.create_vbs_launcher(
+    #     heartbeat_vbs,
+    #     heartbeat_exe,
+    #     INSTALL_DIR
+    # )
+
     task_scheduler.create_vbs_launcher(
-        heartbeat_vbs,
-        heartbeat_exe,
-        INSTALL_DIR
+    heartbeat_bat,
+    heartbeat_exe,
+    INSTALL_DIR
     )
 
     # Read schedule values from deployed config.json
@@ -313,10 +328,18 @@ def main():
     print(f"  KRA check time     : {kra_check_time}")
 
 
+    # tasks = [
+    #     ("KRA Auto Checker",  f'wscript.exe "{kra_vbs}"',       f"/sc daily /st {kra_check_time}"),
+    #     ("Station Heartbeat", f'wscript.exe "{heartbeat_vbs}"', f"/sc minute /mo {heartbeat_interval} /st 00:00"),
+    # ]
+
     tasks = [
-        ("KRA Auto Checker",  f'wscript.exe "{kra_vbs}"',       f"/sc daily /st {kra_check_time}"),
-        ("Station Heartbeat", f'wscript.exe "{heartbeat_vbs}"', f"/sc minute /mo {heartbeat_interval} /st 00:00"),
+        ("KRA Auto Checker",  f'"{kra_bat}"',       f"/sc daily /st {kra_check_time}"),
+        ("Station Heartbeat", f'"{heartbeat_bat}"', f"/sc minute /mo {heartbeat_interval} /st 00:00"),
     ]
+
+    
+
 
     for task_name, task_cmd, schedule in tasks:
         # windows_user, windows_pass

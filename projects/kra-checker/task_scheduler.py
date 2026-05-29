@@ -4,17 +4,38 @@ import json
 import subprocess
 
 
-def create_vbs_launcher(vbs_path, exe_path, working_dir):
+# def create_vbs_launcher(vbs_path, exe_path, working_dir):
+#     """
+#     Create hidden VBS launcher.
+#     """
+#     with open(vbs_path, "w") as f:
+#         # f.write(
+#         #     f'Dim sh\n'
+#         #     f'Set sh = CreateObject("WScript.Shell")\n'
+#         #     f'sh.CurrentDirectory = "{working_dir}"\n'
+#         #     f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
+#         # )
+#         f.write(
+#             'Set sh = CreateObject("WScript.Shell")\n'
+#             f'sh.CurrentDirectory = "{working_dir}"\n'
+#             f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
+#         )
+
+def create_vbs_launcher(bat_path, exe_path, working_dir):
     """
-    Create hidden VBS launcher.
+    Creates a silent batch launcher.
+    Named create_vbs_launcher for backwards compatibility.
+    VBS blocked by WScript.Shell policy on some stations — bat is more reliable.
     """
-    with open(vbs_path, "w") as f:
+    with open(bat_path, "w") as f:
         f.write(
-            f'Dim sh\n'
-            f'Set sh = CreateObject("WScript.Shell")\n'
-            f'sh.CurrentDirectory = "{working_dir}"\n'
-            f'sh.Run Chr(34) & "{exe_path}" & Chr(34), 0, False\n'
+            f'@echo off\n'
+            f'cd /d "{working_dir}"\n'
+            f'start "" /b "{exe_path}"\n'
+            f'exit\n'
         )
+    return bat_path
+
 
 # windows_user, windows_pass,
 def apply_advanced_task_settings(task_name, log=None):
@@ -46,7 +67,7 @@ def apply_advanced_task_settings(task_name, log=None):
         f'-TaskName \'{task_name}\' '
         f'-Settings $settings'
         f'"'
-        )
+    )
 
     result = subprocess.run(
         settings_cmd,
@@ -76,15 +97,6 @@ def create_or_update_task(
 ):
     """
     Delete, recreate, and apply advanced settings to a scheduled task.
-
-    # Args:
-    #     task_name    : Display name e.g. "KRA Auto Checker"
-    #     task_cmd     : Command to run e.g. 'wscript.exe "C:\\...\\run.vbs"'
-    #     schedule     : schtasks schedule string e.g. "/sc daily /st 19:00"
-    #     windows_user : Windows account e.g. "DESKTOP-ABC\\john"
-    #     windows_pass : Windows account password
-    #     log          : Optional logger instance
-
     No windows_user or windows_pass needed — runs as SYSTEM.
     SYSTEM + highest privilege = runs locked, logged out, on battery.
     PowerShell can modify these tasks without credentials later.
@@ -96,10 +108,19 @@ def create_or_update_task(
         capture_output=True
     )
 
+    # create_cmd = (
+    # f'schtasks /create '
+    # f'/tn "{task_name}" '
+    # f'/tr "{task_cmd}" '
+    # f'{schedule} '
+    # f'/f '
+    # f'/ru SYSTEM'
+    # )
+
     create_cmd = (
     f'schtasks /create '
     f'/tn "{task_name}" '
-    f'/tr "{task_cmd}" '
+    f'/tr "cmd /c \\"{task_cmd}\\"" '
     f'{schedule} '
     f'/f '
     f'/ru SYSTEM'

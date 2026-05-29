@@ -28,15 +28,15 @@ pyinstaller --onefile --console --name uninstall uninstall.py
 use the following to bypass the error pyodbc being missed or issues with imports, especially when rebuilding the exes
 
 pyinstaller --onefile --console --name heartbeat_monitor ^
-  --hidden-import pyodbc ^
-  --hidden-import googleapiclient ^
-  --hidden-import googleapiclient.http ^
-  --hidden-import google.auth ^
-  --hidden-import google.oauth2.service_account ^
-  --hidden-import config_loader ^
-  --hidden-import task_scheduler ^
-  --hidden-import packaging ^
-  heartbeat_monitor.py
+--hidden-import pyodbc ^
+--hidden-import googleapiclient ^
+--hidden-import googleapiclient.http ^
+--hidden-import google.auth ^
+--hidden-import google.oauth2.service_account ^
+--hidden-import config_loader ^
+--hidden-import task_scheduler ^
+--hidden-import packaging ^
+heartbeat_monitor.py
 
 pyinstaller --onefile --console --name kra_checker ^
   --hidden-import pyodbc ^

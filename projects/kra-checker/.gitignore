@@ -6,6 +6,8 @@ KRA_Installer/
 Builder/
 Old Local Test/
 New Local Test/
+Test Config/
+KRA_Installer.rar
 
 # Python cache
 __pycache__/

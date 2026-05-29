@@ -18,7 +18,7 @@ tasks run:
 while locked
 while logged out
 after reboot
-silently via VBS launcher
+silently via Bat launcher
 
 ---
 
@@ -151,10 +151,10 @@ Survives reboot automatically
 Higher reliability than user-bound tasks
 Silent execution
 
-Tasks launch through hidden VBScript (.vbs) wrappers:
+Tasks launch through silent batch (.bat) wrappers:
 
-`wscript.exe run_heartbeat.vbs`\
-`wscript.exe run_kra_checker.vbs`
+`run_heartbeat.bat`
+`run_kra_checker.bat`
 
 #### This prevents:
 
@@ -465,11 +465,10 @@ Builddet/
 ├── fetch_station_info.py
 ├── install.py
 ├── uninstall.py
-├── config.json
-├── credentials.json
+├── build.bat
 ├── clean_build.bat
 ├── task_scheduler
-└── requirements.txt this should be ran when setting up the program for development, testing executables snd testing python source
+└── requirements.txt this should be ran when setting up the program for development, testing executables and testing python source, run it in CL-Automation-and-ops-engineering\projects\kra-checker
 ```
 
 **Installer folder** (copied to each station):
@@ -491,8 +490,8 @@ C:\Automation_and_ops_engineering\KRA_Checker\
 ├── kra_checker.exe
 ├── heartbeat_monitor.exe
 ├── uninstall.exe
-├── run_kra_checker.vbs        ← Task Scheduler calls this (silent launch)
-├── run_heartbeat.vbs          ← Task Scheduler calls this (silent launch)
+├── run_kra_checker.bat        ← Task Scheduler calls this (silent launch)
+├── run_heartbeat.bat          ← Task Scheduler calls this (silent launch)
 ├── credentials.json
 ├── config.json
 ├── anydesk_detector.py
@@ -509,7 +508,7 @@ Tasks run under the built-in Windows SYSTEM account. No Windows username or pass
 
 Both programs run completely silently when triggered by Task Scheduler. No console window appears on screen.
 
-**How it works:** Task Scheduler calls `wscript.exe run_heartbeat.vbs` instead of the exe directly. VBScript's `Run` with parameter `0` starts the process with no window at all — no flash, no minimize, nothing visible to station staff.
+**How it works:** Task Scheduler calls the batch file directly instead of the exe. The batch file uses `start "" /b` to launch the exe in the background with no visible window — no flash, no console, nothing visible to station staff. VBScript wrappers were the original approach but are blocked by WScript.Shell policy on some station configurations, making the batch approach more reliable across all machines.
 
 **For debugging:** Run the `.py` files directly with Python from CMD to see full console output:
 ```cmd
@@ -530,7 +529,7 @@ python heartbeat_monitor.py
    - If not found, prompt for name and **register it in the sheet automatically**
    - Ask for SQL Server `sa` password (only manual input required)
    - Copy all files to `C:\Automation_and_ops_engineering\KRA_Checker\`
-   - Create two VBS launchers for silent execution
+   - Create two BAT launchers for silent execution
   - Create Task Scheduler tasks under SYSTEM account
   - Configure advanced scheduler settings automatically:
     - Run with highest privileges
@@ -538,7 +537,7 @@ python heartbeat_monitor.py
     - Do not stop on battery
     - Start missed tasks automatically
     - Ignore overlapping runs
-  - Create silent VBS launchers for hidden execution
+  - Create silent BAT launchers for hidden execution
    - Mark station as installed in Station Mapping sheet
 
 ---
@@ -603,13 +602,24 @@ pyinstaller --onefile --console --name kra_checker ^
   kra_auto_checker.py
 
 
-pyinstaller --onefile --console --name heartbeat_monitor ^
+<!-- pyinstaller --onefile --console --name heartbeat_monitor ^
   --hidden-import pyodbc ^
   --hidden-import googleapiclient ^
   --hidden-import googleapiclient.http ^
   --hidden-import google.auth ^
   --hidden-import google.oauth2.service_account ^
   --hidden-import config_loader ^
+  --hidden-import packaging ^
+  heartbeat_monitor.py -->
+
+  pyinstaller --onefile --console --name heartbeat_monitor ^
+  --hidden-import pyodbc ^
+  --hidden-import googleapiclient ^
+  --hidden-import googleapiclient.http ^
+  --hidden-import google.auth ^
+  --hidden-import google.oauth2.service_account ^
+  --hidden-import config_loader ^
+  --hidden-import task_scheduler ^
   --hidden-import packaging ^
   heartbeat_monitor.py
 
@@ -620,7 +630,7 @@ pyinstaller --onefile --console --name uninstall ^
   uninstall.py
 ```
 
-> Use `--console` for all builds. The programs call `ShowWindow(hwnd, 0)` on startup but Task Scheduler uses the VBS launcher which starts with no window at all. For debugging, run `.py` files directly with Python.
+> Use `--console` for all builds. The programs call `ShowWindow(hwnd, 0)` on startup but Task Scheduler uses the BAT launcher which starts with no window at all. For debugging, run `.py` files directly with Python.
 
 ---
 

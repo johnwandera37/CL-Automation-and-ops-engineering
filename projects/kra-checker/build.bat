@@ -57,8 +57,7 @@ REM =====================================================
 
 echo [4/5] Building heartbeat_monitor.exe...
 
-pyinstaller --onefile --console ^
---name heartbeat_monitor ^
+pyinstaller --onefile --console --name heartbeat_monitor ^
 --hidden-import pyodbc ^
 --hidden-import googleapiclient ^
 --hidden-import googleapiclient.http ^
