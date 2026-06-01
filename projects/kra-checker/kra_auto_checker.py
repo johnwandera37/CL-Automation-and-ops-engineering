@@ -20,6 +20,7 @@ import os
 from datetime import datetime
 from typing import Optional, Tuple, Dict
 
+GLOBAL_LOGGER = None
 logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 
 # ── Hide console when running via Task Scheduler ──────────────────────────────
@@ -68,21 +69,36 @@ class SheetLogger:
         self.sheets  = sheets_manager
         self.config  = config
         self._log    = logging.getLogger(__name__)
+        self.log_buffer = []
 
     def _write(self, level: str, message: str):
         emoji = {"INFO": "🟢", "WARNING": "🟡", "ERROR": "🔴", "SUCCESS": "🟢"}.get(level, "⚪")
         getattr(self._log, level.lower() if level != "SUCCESS" else "info")(
             f"{emoji} {message}"
         )
-        try:
-            self.sheets.add_log_entry(level, message)
-        except Exception:
-            pass
+
+        self.log_buffer.append(
+            (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # exact time captured now
+                level,
+                message
+            )
+        )
 
     def info(self, m):    self._write("INFO", m)
     def warning(self, m): self._write("WARNING", m)
     def error(self, m):   self._write("ERROR", m)
     def success(self, m): self._write("SUCCESS", m)
+
+    def flush(self):
+        if not self.log_buffer:
+            return
+        try:
+            self.sheets.add_log_entries(self.log_buffer)
+        except Exception:
+            pass
+
+        self.log_buffer.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,6 +322,16 @@ class GoogleSheetsManager:
         self.config = config
         self._log   = logging.getLogger(__name__)
         self.service = self._authenticate()
+        self._sheet_metadata_cache = None  # cached once per run
+        self._sheet_id_cache       = {}    # sheet_name -> sheet_id
+
+    def _get_spreadsheet_metadata(self):
+        """Fetch and cache spreadsheet metadata — called at most once per run."""
+        if self._sheet_metadata_cache is None:
+            self._sheet_metadata_cache = self.service.spreadsheets().get(
+                spreadsheetId=self.config.get("spreadsheet_id")
+            ).execute()
+        return self._sheet_metadata_cache
 
     def _authenticate(self):
         sa_file = self.config.get("service_account_file", "credentials.json")
@@ -316,7 +342,8 @@ class GoogleSheetsManager:
 
     # ── Public write methods ──────────────────────────────────────────
 
-    def add_report_entry(self, data: Dict):
+    def add_report_entries(self, entries: list):
+        """Write multiple report rows in a single API call — keeps station rows together."""
         sid = self.config.get("spreadsheet_id")
         self._ensure_sheet("Report", self.REPORT_HEADERS)
         self._heal_schema("Report", self.REPORT_HEADERS)
@@ -324,24 +351,27 @@ class GoogleSheetsManager:
         today = datetime.now().strftime("%d/%m/%Y")
         self._insert_date_separator("Report", today, len(self.REPORT_HEADERS))
 
-        raw = data.get("status", "")
-        if "SUCCESS"       in raw: status_cell = "🟢 SUCCESS"
-        elif "NOT_SUBMITTED" in raw: status_cell = "🔴 NOT SUBMITTED"
-        elif "ERROR"       in raw: status_cell = "🟡 ERROR"
-        elif "NO DATA"     in raw: status_cell = "⚪ NO DATA"
-        else:                       status_cell = raw
+        values = []
+        for data in entries:
+            raw = data.get("status", "")
+            if "SUCCESS"         in raw: status_cell = "🟢 SUCCESS"
+            elif "NOT_SUBMITTED" in raw: status_cell = "🔴 NOT SUBMITTED"
+            elif "ERROR"         in raw: status_cell = "🟡 ERROR"
+            elif "NO DATA"       in raw: status_cell = "⚪ NO DATA"
+            else:                        status_cell = raw
 
-        values = [[
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            self.config.get("station_name", ""),
-            self.config.get("anydesk_code", ""),
-            data.get("check_date", ""),
-            status_cell,
-            data.get("transaction_date", ""),
-            data.get("invoice_number", ""),
-            data.get("qr_link", ""),
-            data.get("details", ""),
-        ]]
+            values.append([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                self.config.get("station_name", ""),
+                self.config.get("anydesk_code", ""),
+                data.get("check_date", ""),
+                status_cell,
+                data.get("transaction_date", ""),
+                data.get("invoice_number", ""),
+                data.get("qr_link", ""),
+                data.get("details", ""),
+            ])
+
         self.service.spreadsheets().values().append(
             spreadsheetId=sid,
             range="Report!A:I",
@@ -350,8 +380,9 @@ class GoogleSheetsManager:
             body={"values": values},
         ).execute()
         self._auto_resize("Report")
-        self._log.info("Report entry written")
+        self._log.info(f"Report: {len(values)} entries written")
 
+    # For backward compatibility, currently not being used
     def add_log_entry(self, level: str, message: str):
         try:
             sid = self.config.get("spreadsheet_id")
@@ -379,19 +410,58 @@ class GoogleSheetsManager:
         except Exception:
             pass  # never crash main flow
 
+
+    def add_log_entries(self, entries):
+        """
+        Bulk append log entries in a single API call.
+        entries = [(timestamp, level, message), ...]
+        """
+
+        try:
+            sid = self.config.get("spreadsheet_id")
+
+            self._ensure_sheet("Logs", self.LOG_HEADERS)
+
+            today = datetime.now().strftime("%d/%m/%Y")
+            self._insert_date_separator("Logs", today, len(self.LOG_HEADERS))
+
+            values = []
+            for timestamp, level, message in entries:
+                values.append([
+                    timestamp,
+                    self.config.get("station_name", ""),
+                    self.config.get("anydesk_code", ""),
+                    self.LEVEL_EMOJI.get(level.upper(), level),
+                    message
+                ])
+
+            self.service.spreadsheets().values().append(
+                spreadsheetId=sid,
+                range="Logs!A:E",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": values}
+            ).execute()
+
+            self._auto_resize("Logs")
+
+        except Exception:
+            pass
+
+
     # ── Internal helpers ──────────────────────────────────────────────
 
     def _ensure_sheet(self, name: str, headers: list):
-        meta     = self.service.spreadsheets().get(
-            spreadsheetId=self.config.get("spreadsheet_id")
-        ).execute()
+        meta     = self._get_spreadsheet_metadata()
         existing = [s["properties"]["title"] for s in meta.get("sheets", [])]
         if name in existing:
             return
+        # Sheet doesn't exist — create it and invalidate cache
         self.service.spreadsheets().batchUpdate(
             spreadsheetId=self.config.get("spreadsheet_id"),
             body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
         ).execute()
+        self._sheet_metadata_cache = None  # invalidate so next call re-fetches
         col = self._col(len(headers) - 1)
         self.service.spreadsheets().values().update(
             spreadsheetId=self.config.get("spreadsheet_id"),
@@ -417,27 +487,55 @@ class GoogleSheetsManager:
             self._log.warning(f"Auto-healed schema: {sheet_name}")
 
     def _get_sheet_id(self, sheet_name: str) -> int:
-        meta = self.service.spreadsheets().get(
-            spreadsheetId=self.config.get("spreadsheet_id")
-        ).execute()
-        for s in meta.get("sheets", []):
-            if s["properties"]["title"] == sheet_name:
-                return s["properties"]["sheetId"]
-        raise ValueError(f"Sheet not found: {sheet_name}")
+        if sheet_name not in self._sheet_id_cache:
+            meta = self._get_spreadsheet_metadata()
+            for s in meta.get("sheets", []):
+                if s["properties"]["title"] == sheet_name:
+                    self._sheet_id_cache[sheet_name] = s["properties"]["sheetId"]
+                    return s["properties"]["sheetId"]
+            raise ValueError(f"Sheet not found: {sheet_name}")
+        return self._sheet_id_cache[sheet_name]
+
+    
+    """ 
+    Let one station Write today's date to a known cell (Z1). All stations
+    check that cell first, First station to write it wins, rest skip. One read call,
+    one write call, cell acts as a shared flag across all stations
+    """
+    def _date_separator_written_today(self, sheet_name: str, date_str: str) -> bool:
+        """Check shared flag cell — much faster than scanning column A."""
+        try:
+            flag_cell = "Z1" if sheet_name == "Report" else "F1"
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.config.get("spreadsheet_id"),
+                range=f"{sheet_name}!{flag_cell}"
+            ).execute()
+            val = result.get("values", [[]])[0][0] if result.get("values") else ""
+            return val.strip() == date_str
+        except Exception:
+            return False
+
+    def _mark_separator_written(self, sheet_name: str, date_str: str):
+        flag_cell = "Z1" if sheet_name == "Report" else "F1"
+        try:
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.config.get("spreadsheet_id"),
+                range=f"{sheet_name}!{flag_cell}",
+                valueInputOption="RAW",
+                body={"values": [[date_str]]}
+            ).execute()
+        except Exception:
+            pass
 
     def _insert_date_separator(self, sheet_name: str, date_str: str, num_cols: int):
         """
         Appends a plain merged date row when the date changes.
-        Flag file prevents duplicates — only the first run each day inserts it.
-        No color, no bold — plain text merged across all columns.
+        Uses a shared flag cell (Z1 for Report, F1 for Logs) visible to all stations.
+        First station to run each day inserts the separator, rest skip.
         """
-        import pathlib
-        flag_file = os.path.join(BASE_DIR, f".lastdate_{sheet_name.replace(' ', '_')}")
-        try:
-            if os.path.exists(flag_file) and pathlib.Path(flag_file).read_text().strip() == date_str:
-                return False
-        except Exception:
-            pass
+        if self._date_separator_written_today(sheet_name, date_str):
+            return False
+
         try:
             sheet_id = self._get_sheet_id(sheet_name)
             self.service.spreadsheets().values().append(
@@ -447,11 +545,13 @@ class GoogleSheetsManager:
                 insertDataOption="INSERT_ROWS",
                 body={"values": [[date_str]]}
             ).execute()
-            rows     = self.service.spreadsheets().values().get(
+
+            rows = self.service.spreadsheets().values().get(
                 spreadsheetId=self.config.get("spreadsheet_id"),
                 range=f"{sheet_name}!A:A"
             ).execute().get("values", [])
             next_row = len(rows)
+
             self.service.spreadsheets().batchUpdate(
                 spreadsheetId=self.config.get("spreadsheet_id"),
                 body={"requests": [{
@@ -467,8 +567,10 @@ class GoogleSheetsManager:
                     }
                 }]}
             ).execute()
-            pathlib.Path(flag_file).write_text(date_str)
+
+            self._mark_separator_written(sheet_name, date_str)
             return True
+
         except Exception as e:
             self._log.warning(f"[DATE SEP] {sheet_name}: {e}")
             return False
@@ -587,6 +689,8 @@ def main():
     config        = ConfigLoader()
     sheets        = GoogleSheetsManager(config)
     logger        = SheetLogger(sheets, config)
+    global GLOBAL_LOGGER
+    GLOBAL_LOGGER = logger
     db            = DatabaseManager(config, logger)
     kra           = KRAChecker(config, logger)
     retry_manager = RetryManager(config, logger)
@@ -600,6 +704,9 @@ def main():
     logger.info(f"Mode    : {'RETRY' if is_retry else 'INITIAL'}")
 
     # ── Determine which transaction to check ─────────────────────────
+    report_entries   = []
+    failed_transactions = []
+
     if is_retry:
         retry_data = retry_manager.load()
         if not retry_data:
@@ -609,16 +716,16 @@ def main():
 
         logger.info(f"Retry attempt #{retry_data['retry_count']}")
 
-        transaction_list = []
-
-        for tx in retry_data.get("transactions", []):
-
-            transaction_list.append({
-                "QRLink": tx["qr_link"],
+        transaction_list = [
+            {
+                "QRLink"      : tx["qr_link"],
                 "TransDateTime": tx["transaction_date"],
-                "CheckDate": tx["check_date"],
-                "PaymentMode": tx.get("payment_mode", "UNKNOWN"),
-            })
+                "CheckDate"   : tx["check_date"],
+                "PaymentMode" : tx.get("payment_mode", "UNKNOWN"),
+            }
+            for tx in retry_data.get("transactions", [])
+        ]
+
     else:
         check_date   = datetime.now()
         # # Change the date to test if data in db is old
@@ -630,37 +737,28 @@ def main():
         if transactions["fuel_card"]:
             transaction_list.append(transactions["fuel_card"])
         else:
-            # logger.warning("No Fuel Card transaction found today")
-
-            sheets.add_report_entry({
-                "check_date": check_date.strftime("%Y-%m-%d"),
-                "status": "NO DATA",
+            report_entries.append({
+                "check_date"      : check_date.strftime("%Y-%m-%d"),
+                "status"          : "NO DATA",
                 "transaction_date": "N/A",
-                "invoice_number": "N/A",
-                "qr_link": "N/A",
-                "details": "No Fuel Card transaction found today",
+                "invoice_number"  : "N/A",
+                "qr_link"         : "N/A",
+                "details"         : "No Fuel Card transaction found today",
             })
 
         if transactions["other"]:
             transaction_list.append(transactions["other"])
         else:
-            # logger.warning("No non-fuel transaction found today")
-
-            sheets.add_report_entry({
-                "check_date": check_date.strftime("%Y-%m-%d"),
-                "status": "NO DATA",
+            report_entries.append({
+                "check_date"      : check_date.strftime("%Y-%m-%d"),
+                "status"          : "NO DATA",
                 "transaction_date": "N/A",
-                "invoice_number": "N/A",
-                "qr_link": "N/A",
-                "details": "No non-fuel transaction found today",
+                "invoice_number"  : "N/A",
+                "qr_link"         : "N/A",
+                "details"         : "No non-fuel transaction found today",
             })
 
-        if not transaction_list:
-            logger.warning("No transactions found for today")
-            return
-
-    # ── Check the QR link ────────────────────────────────────────────
-    failed_transactions = []
+    # ── Check all transactions against KRA first ──────────────────────
     for transaction in transaction_list:
 
         logger.info(
@@ -681,87 +779,75 @@ def main():
 
         logger.info(f"Result: {status} — {details}")
 
+        entry = {
+            "check_date"      : transaction["CheckDate"],
+            "status"          : status,
+            "transaction_date": trans_date or "N/A",
+            "invoice_number"  : invoice    or "N/A",
+            "qr_link"         : transaction["QRLink"],
+            "details"         : f"[{transaction.get('PaymentMode')}] {details}",
+        }
+
         if status == "SUCCESS":
-
             logger.success("Transaction confirmed with KRA")
-
-            sheets.add_report_entry({
-                "check_date": transaction["CheckDate"],
-                "status": "SUCCESS",
-                "transaction_date": trans_date or "N/A",
-                "invoice_number": invoice or "N/A",
-                "qr_link": transaction["QRLink"],
-                "details": f"[{transaction.get('PaymentMode')}] {details}",
-            })
 
         elif status in ("NOT_SUBMITTED", "ERROR"):
 
             logger.warning(f"{status}: {details}")
-
             transaction["LastStatus"] = status
             failed_transactions.append(transaction)
 
-            sheets.add_report_entry({
-                "check_date": transaction["CheckDate"],
-                "status": status,
-                "transaction_date": trans_date or "N/A",
-                "invoice_number": invoice or "N/A",
-                "qr_link": transaction["QRLink"],
-                "details": f"[{transaction.get('PaymentMode')}] {details}",
-            })
+        report_entries.append(entry)
+
+    # ── Write all results in one batch API call ───────────────────────
+    if report_entries:
+        sheets.add_report_entries(report_entries)
 
 
-    # ADD GLOBAL RETRY HANDLER
+    # ── Handle retries ────────────────────────────────────────────────
     if failed_transactions:
-
-        next_retry_time = None
-
         retry_count = (
             retry_data["retry_count"]
-            if "--retry" in sys.argv
+            if is_retry
             else 0
         )
 
         if retry_count < len(retry_hours):
-
-            next_retry_hour = retry_hours[retry_count]
-
-            next_retry_time = f"{next_retry_hour:02d}:00"
-
-        if next_retry_time:
-
-            retry_count = retry_data["retry_count"] if "--retry" in sys.argv else 0
-            retry_manager.save(
-                failed_transactions,
-                retry_count
-            )
+            next_retry_time = f"{retry_hours[retry_count]:02d}:00"
+            retry_manager.save(failed_transactions, retry_count)
             retry_manager.schedule(next_retry_time)
-
             logger.info(
-                f"Next retry scheduled at {next_retry_time} "
+                f"Next retry at {next_retry_time} "
                 f"for {len(failed_transactions)} transaction(s)"
             )
-
         else:
-
             logger.warning("All retries exhausted")
-
             retry_manager.delete()
-
     else:
-
         retry_manager.delete()
     logger.info("=" * 60)
+    logger.flush()
 
 
 if __name__ == "__main__":
     try:
         main()
+
     except KeyboardInterrupt:
         print("\n⚠ Interrupted")
+
+        if GLOBAL_LOGGER:
+            GLOBAL_LOGGER.flush()
+
         sys.exit(0)
+
     except Exception as e:
         import traceback
+
         print(f"\n❌ Fatal error: {e}")
         traceback.print_exc()
+
+        if GLOBAL_LOGGER:
+            GLOBAL_LOGGER.flush()
+
         sys.exit(1)

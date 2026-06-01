@@ -393,6 +393,16 @@ class GoogleSheetsManager:
         self.config  = config
         self.logger  = logging.getLogger(__name__)
         self.service = self._authenticate()
+        self._sheet_metadata_cache = None  # cached once per run
+        self._sheet_id_cache       = {}    # sheet_name -> sheet_id
+
+    def _get_spreadsheet_metadata(self):
+        """Fetch and cache spreadsheet metadata — called at most once per run."""
+        if self._sheet_metadata_cache is None:
+            self._sheet_metadata_cache = self.service.spreadsheets().get(
+                spreadsheetId=self.config.get("spreadsheet_id")
+            ).execute()
+        return self._sheet_metadata_cache    
 
     def _authenticate(self):
         sa_file = self.config.get("service_account_file", "credentials.json")
@@ -445,6 +455,7 @@ class GoogleSheetsManager:
             self._auto_resize("Station Status")
             self.logger.info("Added new station row")
 
+    # Writes one entry at a time which is fine since errors are rare. No buffering needed here
     def log_error(self, level: str, message: str):
         try:
             sid = self.config.get("spreadsheet_id")
@@ -523,10 +534,29 @@ class GoogleSheetsManager:
         except Exception as e:
             self.logger.warning(f"Could not write status formula: {e}")
 
+    # For backward compatibility just in case things go sideways
+    # def _ensure_sheet_exists(self, name: str, headers: list):
+    #     meta     = self.service.spreadsheets().get(
+    #         spreadsheetId=self.config.get("spreadsheet_id")
+    #     ).execute()
+    #     existing = [s["properties"]["title"] for s in meta.get("sheets", [])]
+    #     if name in existing:
+    #         return
+    #     self.service.spreadsheets().batchUpdate(
+    #         spreadsheetId=self.config.get("spreadsheet_id"),
+    #         body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
+    #     ).execute()
+    #     col = self._col_letter(len(headers) - 1)
+    #     self.service.spreadsheets().values().update(
+    #         spreadsheetId=self.config.get("spreadsheet_id"),
+    #         range=f"{name}!A1:{col}1",
+    #         valueInputOption="RAW",
+    #         body={"values": [headers]},
+    #     ).execute()
+    #     self.logger.info(f"Created sheet: {name}")
+
     def _ensure_sheet_exists(self, name: str, headers: list):
-        meta     = self.service.spreadsheets().get(
-            spreadsheetId=self.config.get("spreadsheet_id")
-        ).execute()
+        meta     = self._get_spreadsheet_metadata()
         existing = [s["properties"]["title"] for s in meta.get("sheets", [])]
         if name in existing:
             return
@@ -534,6 +564,7 @@ class GoogleSheetsManager:
             spreadsheetId=self.config.get("spreadsheet_id"),
             body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
         ).execute()
+        self._sheet_metadata_cache = None  # invalidate after creating new sheet
         col = self._col_letter(len(headers) - 1)
         self.service.spreadsheets().values().update(
             spreadsheetId=self.config.get("spreadsheet_id"),
@@ -558,28 +589,107 @@ class GoogleSheetsManager:
             ).execute()
             self.logger.warning(f"Auto-healed schema for {sheet_name}")
 
+    # For backward compatibility just in case things go sideways
+    # def _get_sheet_id(self, sheet_name: str) -> int:
+    #     meta = self.service.spreadsheets().get(
+    #         spreadsheetId=self.config.get("spreadsheet_id")
+    #     ).execute()
+    #     for s in meta.get("sheets", []):
+    #         if s["properties"]["title"] == sheet_name:
+    #             return s["properties"]["sheetId"]
+    #     raise ValueError(f"Sheet not found: {sheet_name}")
+
     def _get_sheet_id(self, sheet_name: str) -> int:
-        meta = self.service.spreadsheets().get(
-            spreadsheetId=self.config.get("spreadsheet_id")
-        ).execute()
-        for s in meta.get("sheets", []):
-            if s["properties"]["title"] == sheet_name:
-                return s["properties"]["sheetId"]
-        raise ValueError(f"Sheet not found: {sheet_name}")
+        if sheet_name not in self._sheet_id_cache:
+            meta = self._get_spreadsheet_metadata()
+            for s in meta.get("sheets", []):
+                if s["properties"]["title"] == sheet_name:
+                    self._sheet_id_cache[sheet_name] = s["properties"]["sheetId"]
+                    return s["properties"]["sheetId"]
+            raise ValueError(f"Sheet not found: {sheet_name}")
+        return self._sheet_id_cache[sheet_name]
+
+    # For backward compatibility just in case things go sideways
+    # def _insert_date_separator(self, sheet_name: str, date_str: str, num_cols: int):
+    #     """
+    #     Appends a plain merged date row when the date changes.
+    #     Flag file prevents duplicates — only the first run each day inserts it.
+    #     No formatting — plain text only.
+    #     """
+    #     import pathlib
+    #     flag_file = os.path.join(BASE_DIR, f".lastdate_{sheet_name.replace(' ', '_')}")
+    #     try:
+    #         if os.path.exists(flag_file) and pathlib.Path(flag_file).read_text().strip() == date_str:
+    #             return False
+    #     except Exception:
+    #         pass
+    #     try:
+    #         sheet_id = self._get_sheet_id(sheet_name)
+    #         self.service.spreadsheets().values().append(
+    #             spreadsheetId=self.config.get("spreadsheet_id"),
+    #             range=f"{sheet_name}!A:A",
+    #             valueInputOption="RAW",
+    #             insertDataOption="INSERT_ROWS",
+    #             body={"values": [[date_str]]}
+    #         ).execute()
+    #         rows = self.service.spreadsheets().values().get(
+    #             spreadsheetId=self.config.get("spreadsheet_id"),
+    #             range=f"{sheet_name}!A:A"
+    #         ).execute().get("values", [])
+    #         next_row = len(rows)
+    #         self.service.spreadsheets().batchUpdate(
+    #             spreadsheetId=self.config.get("spreadsheet_id"),
+    #             body={"requests": [{
+    #                 "mergeCells": {
+    #                     "range": {
+    #                         "sheetId"         : sheet_id,
+    #                         "startRowIndex"   : next_row - 1,
+    #                         "endRowIndex"     : next_row,
+    #                         "startColumnIndex": 0,
+    #                         "endColumnIndex"  : num_cols,
+    #                     },
+    #                     "mergeType": "MERGE_ALL"
+    #                 }
+    #             }]}
+    #         ).execute()
+    #         pathlib.Path(flag_file).write_text(date_str)
+    #         return True
+    #     except Exception as e:
+    #         self.logger.warning(f"[DATE SEP] {sheet_name}: {e}")
+    #         return False
+
+    def _date_separator_written_today(self, sheet_name: str, date_str: str) -> bool:
+        """Check shared flag cell — one read call, works across all stations."""
+        try:
+            flag_cell = "Z1"  # same cell for all heartbeat sheets
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.config.get("spreadsheet_id"),
+                range=f"{sheet_name}!{flag_cell}"
+            ).execute()
+            val = result.get("values", [[]])[0][0] if result.get("values") else ""
+            return val.strip() == date_str
+        except Exception:
+            return False
+
+    def _mark_separator_written(self, sheet_name: str, date_str: str):
+        try:
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.config.get("spreadsheet_id"),
+                range=f"{sheet_name}!Z1",
+                valueInputOption="RAW",
+                body={"values": [[date_str]]}
+            ).execute()
+        except Exception:
+            pass
 
     def _insert_date_separator(self, sheet_name: str, date_str: str, num_cols: int):
         """
         Appends a plain merged date row when the date changes.
-        Flag file prevents duplicates — only the first run each day inserts it.
-        No formatting — plain text only.
+        Uses shared flag cell Z1 visible to all stations.
+        First station to run each day inserts separator, rest skip.
         """
-        import pathlib
-        flag_file = os.path.join(BASE_DIR, f".lastdate_{sheet_name.replace(' ', '_')}")
-        try:
-            if os.path.exists(flag_file) and pathlib.Path(flag_file).read_text().strip() == date_str:
-                return False
-        except Exception:
-            pass
+        if self._date_separator_written_today(sheet_name, date_str):
+            return False
         try:
             sheet_id = self._get_sheet_id(sheet_name)
             self.service.spreadsheets().values().append(
@@ -609,7 +719,7 @@ class GoogleSheetsManager:
                     }
                 }]}
             ).execute()
-            pathlib.Path(flag_file).write_text(date_str)
+            self._mark_separator_written(sheet_name, date_str)
             return True
         except Exception as e:
             self.logger.warning(f"[DATE SEP] {sheet_name}: {e}")

@@ -10,7 +10,7 @@ Each station mini PC runs two background programs:
 
 | Program | Schedule | Purpose |
 |---|---|---|
-| `kra_checker.exe` | Daily at configured time (default 7 PM) | Pulls two random ETIMS transaction from SQL Server, one Fuel Card and any other oayment mode transaction, checks their QR links against KRA portal, writes result to Google Sheets |
+| `kra_checker.exe` | Daily at configured time (recommended: 23:59) | Pulls two random ETIMS transactions from SQL Server, one Fuel Card and any other payment mode transaction, checks their QR links against KRA portal, writes result to Google Sheets |
 | `heartbeat_monitor.exe` | Every N minutes (default 30) | Checks internet, SQL, disk space — updates station status in Google Sheets. Also manages remote updates and config sync for both programs |
 
 tasks run under SYSTEM
@@ -30,7 +30,7 @@ Google Drive                    Automation Helper Sheet
      │                                      │
      └──────────────┬───────────────────────┘
                     │
-          heartbeat_monitor.exe  (runs every x min, (30 min recommneded to reduce API calls and not affect PC performance, but it's extremely light) on each station)
+          heartbeat_monitor.exe  (runs every x min, (30 min recommended to reduce API calls and not affect PC performance, but it's extremely light) on each station)
                     │
           ┌─────────┴──────────────────────────┐
           │                                    │
@@ -127,7 +127,7 @@ Retry scheduling
 #### Controlled remotely from the Global Config sheet:
 | Key           | Example | Meaning                |
 | ------------- | ------- | ---------------------- |
-| `retry_hours` | `0,2,4` | `Retry after 0h, 2h, 4h` |
+| `retry_hours` | `1,3,5` | `Retry after 1h, 3h, 5h` |
 
 This allows failed submissions to recover automatically overnight without technician intervention.
 
@@ -210,6 +210,8 @@ scheduled tasks automatically run once the machine becomes available again.
 
 Only the service account (via API) and `clear_sheets.py` for development can modify data.
 
+### Date Separator Logic
+
 **Date separator rows:** The Report, Logs, and Heartbeat Error Logs sheets automatically insert a merged date row whenever the date changes:
 ```
 ╔25/04/2026 ════════════════════════════╗   ←  merged
@@ -218,7 +220,33 @@ Only the service account (via API) and `clear_sheets.py` for development can mod
 ╔ 26/04/2026 ════════════════════════════╗
   ...
 ```
-Date separators are cached locally — only one API call per new day, not on every write.
+The Report, Logs, and Heartbeat Error Logs sheets automatically insert a merged date row whenever the date changes.
+
+To reduce API calls and eliminate local state files:
+
+Report uses helper cell Z1
+Logs uses helper cell F1
+Heartbeat Error Logs uses its own helper cell
+
+Each station reads the helper cell once per run to determine whether a date separator for the current day already exists.
+
+### Buffered Log Writing
+
+To reduce Google Sheets API usage and prevent log interleaving between stations:
+
+Logs are collected in memory during execution.
+Logs are written in a single batch at the end of the run.
+Original timestamps are preserved.
+Report entries are also written in batches after all transaction checks complete.
+Heartbeat Error Logs remain immediate because they are written once per station.
+
+Benefits:
+
+Fewer API calls.
+Reduced chance of mixed log ordering.
+Faster execution.
+Cleaner station-level diagnostics.
+
 
 ### Automation Helper (Control Spreadsheet)
 
@@ -315,7 +343,7 @@ Changes take effect on every station within one heartbeat cycle. No manual inter
 | `timeout` | 15 | HTTP request timeout in seconds |
 | `retry_hours` | 0,2,4 | Hours to retry failed transactions overnight |
 | `heartbeat_interval` | 30 | Minutes between heartbeat runs. Heartbeat automatically updates the Windows Task Scheduler trigger remotely |
-| `kra_check_time` | 19:00 | Daily time to run KRA checker. Heartbeat automatically updates the Windows Task Scheduler trigger remotely |
+| `kra_check_time` | 23:59 | Daily time to run KRA checker. Heartbeat automatically updates the Windows Task Scheduler trigger remotely |
 | `remote_version_kra` | 1.0.0 | Bump to trigger kra_checker.exe update on all stations |
 | `remote_version_heartbeat` | 1.0.0 | Bump to trigger heartbeat_monitor.exe update on all stations |
 | `kra_checker_drive_id` | — | Google Drive file ID for kra_checker.exe |
@@ -348,14 +376,15 @@ The system is designed to stay well within Google Sheets API limits (60 reads/wr
 | Write station status | 1 write | Every heartbeat |
 | Write KRA result | 1 write | Once daily |
 | Write log entry | 1 write | Per event |
-| Date separator | 2 calls | **Once per day** (flag file cached) |
+| Date separator check | 1 read | **Once per day** (cache the spreadsheet metadata) |
+| Date separator insert | Only when date changes | **Once**  |
 | Task sync | 0 reads | Compares against config.json, no API |
-| Auto-update check | Drive API | 60s thread timeout, fails safely |
+| Auto-update check | Drive API | Every heartbeat cycle |
 
 **Key design decisions:**
-- Date separators use a local `.lastdate_SheetName` flag file — 2 API calls once per day, then zero
+- Date separators use helper cells inside Google Sheets (Z1/F1) and are cached once per run, eliminating local state files.
 - Task Scheduler sync compares against `config.json` cache, not `schtasks /query` — zero API calls
-- Auto-updater runs in a background thread with 60 second timeout — never blocks the heartbeat
+- Auto-updater runs in a background thread so heartbeat execution and station status updates are not delayed while update checks and downloads are performed.
 
 ---
 
@@ -379,14 +408,27 @@ When a newer version is detected in the Global Config sheet:
 
 ### Non-Blocking Design
 
-The updater runs in a background thread and never blocks normal heartbeat execution.
+The updater runs in a separate background thread.
 
-This means:
+This allows heartbeat monitoring and station status reporting to complete independently while update downloads continue in the background.
+
+Benefits:
 
 * Station status updates continue normally
 * Heartbeat schedules remain accurate
-* Long downloads do not interrupt monitoring
-* Slow internet connections do not freeze the main program
+* Large executable downloads do not delay monitoring
+* Slow internet connections do not block the main heartbeat workflow
+* Download progress can continue after heartbeat processing completes
+
+### Background Download Behavior
+
+Update downloads run in a non-daemon worker thread.
+
+This is intentional.
+
+Using a daemon thread caused downloads to terminate as soon as the main heartbeat process exited, resulting in partially downloaded files and repeated restart attempts on subsequent heartbeat cycles.
+
+Running downloads in a non-daemon thread allows the download to complete safely even after normal heartbeat processing has finished.
 
 ### Download Protection & Recovery
 
@@ -398,6 +440,10 @@ To prevent corrupted or duplicate updates, the updater uses temporary lock files
 ```
 
 These files exist only while a download is actively running.
+
+If a later heartbeat cycle detects an active lock file, it assumes an update is already in progress and skips starting a second download.
+
+This prevents duplicate downloads and unnecessary bandwidth usage on slow station connections.
 
 ### Interrupted Download Recovery
 
@@ -495,10 +541,7 @@ C:\Automation_and_ops_engineering\KRA_Checker\
 ├── credentials.json
 ├── config.json
 ├── anydesk_detector.py
-├── fetch_station_info.py
-├── .lastdate_Report           ← flag: last date separator written
-├── .lastdate_Logs
-└── .lastdate_Heartbeat_Error_Logs
+└── fetch_station_info.py
 ```
 
 ---
@@ -581,7 +624,6 @@ python clear_sheets.py
 This:
 - Removes sheet protection(Previously protection existed in the sheet but not there anymore, it wont affect the running of this script)
 - Clears all data rows (keeps headers)
-- Deletes all local flag files (`.lastdate_*`) if exists
 - After next program run, separators is re-applied fresh
 
 ---
@@ -664,3 +706,12 @@ pyinstaller --onefile --console --name uninstall ^
 | `credentials.json`          | Google service account key             | Yes                   |
 | `requirements.txt`          | Python dependencies                    | No                    |
 | `hook-config_loader.py`     | PyInstaller hook                       | No                    |
+
+
+## Future Roadmap
+
+Planned Future Enhancements
+- Machine ID support for station identity validation.
+- AnyDesk auto-reconciliation.
+- Network diagnostics and heartbeat retry logic.
+- Optional automatic credentials deployment tooling.
