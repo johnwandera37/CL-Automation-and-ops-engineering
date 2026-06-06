@@ -300,12 +300,12 @@ class GoogleSheetsManager:
 
     REPORT_HEADERS = [
         "Timestamp", "Station", "AnyDesk", "Check Date",
-        "Status", "Trans Date", "Invoice", "QR Link", "Details",
+        "Status", "Trans Date", "Invoice", "QR Link", "Details", "Retries"
     ]
     LOG_HEADERS = ["Timestamp", "Station", "AnyDesk", "Level", "Message"]
 
     COLUMN_WIDTHS = {
-        "Report": [160, 180, 130, 100, 130, 100, 130, 300, 250],
+        "Report": [160, 180, 130, 100, 130, 100, 130, 300, 250, 70],
         "Logs"  : [160, 180, 130, 90,  400],
     }
 
@@ -342,6 +342,68 @@ class GoogleSheetsManager:
 
     # ── Public write methods ──────────────────────────────────────────
 
+    def update_report_entry(self, qr_link: str, data: Dict, retry_count: int):
+        """
+        Find the existing row for this QR link and overwrite it.
+        Falls back to appending if not found.
+        """
+        sid = self.config.get("spreadsheet_id")
+        try:
+            # Read QR Link column (column H = index 7)
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=sid,
+                range="Report!H:H"
+            ).execute()
+            rows = result.get("values", [])
+
+            row_num = None
+            for i, row in enumerate(rows):
+                if row and row[0].strip() == qr_link.strip():
+                    row_num = i + 1  # 1-based
+                    break
+
+            raw = data.get("status", "")
+            if "SUCCESS"         in raw: status_cell = "🟢 SUCCESS"
+            elif "NOT_SUBMITTED" in raw: status_cell = "🔴 NOT SUBMITTED"
+            elif "ERROR"         in raw: status_cell = "🟡 ERROR"
+            elif "NO DATA"       in raw: status_cell = "⚪ NO DATA"
+            else:                        status_cell = raw
+
+            values = [[
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                self.config.get("station_name", ""),
+                self.config.get("anydesk_code", ""),
+                data.get("check_date", ""),
+                status_cell,
+                data.get("transaction_date", ""),
+                data.get("invoice_number", ""),
+                data.get("qr_link", ""),
+                data.get("details", ""),
+                retry_count,
+            ]]
+
+            if row_num:
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=sid,
+                    range=f"Report!A{row_num}:J{row_num}",
+                    valueInputOption="RAW",
+                    body={"values": values},
+                ).execute()
+                self._log.info(f"Report row {row_num} updated (retry #{retry_count})")
+            else:
+                # Not found — append as new row
+                self.service.spreadsheets().values().append(
+                    spreadsheetId=sid,
+                    range="Report!A:J",
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body={"values": values},
+                ).execute()
+                self._log.info(f"Report entry appended (retry #{retry_count}, original not found)")
+
+        except Exception as e:
+            self._log.warning(f"Could not update report entry: {e}")
+
     def add_report_entries(self, entries: list):
         """Write multiple report rows in a single API call — keeps station rows together."""
         sid = self.config.get("spreadsheet_id")
@@ -370,11 +432,12 @@ class GoogleSheetsManager:
                 data.get("invoice_number", ""),
                 data.get("qr_link", ""),
                 data.get("details", ""),
+                data.get("retry_count", 0),
             ])
 
         self.service.spreadsheets().values().append(
             spreadsheetId=sid,
-            range="Report!A:I",
+            range="Report!A:J",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": values},
@@ -610,7 +673,7 @@ class GoogleSheetsManager:
 # ─────────────────────────────────────────────────────────────────────────────
 # Retry Manager
 # ─────────────────────────────────────────────────────────────────────────────
-
+import subprocess
 class RetryManager:
 
     def __init__(self, config: ConfigLoader, logger: SheetLogger):
@@ -663,16 +726,76 @@ class RetryManager:
             os.remove(self.retry_file)
             self.logger.info("Cleared retry file")
 
+    # def schedule(self, retry_time: str):
+    #     exe_path  = os.path.abspath(sys.argv[0])
+    #     task_name = f"KRA_Retry_{retry_time.replace(':', '')}"
+    #     os.system(f'schtasks /delete /tn "{task_name}" /f >nul 2>&1')
+    #     os.system(
+    #         f'schtasks /create /tn "{task_name}" '
+    #         f'/tr "\\"{exe_path}\\" --retry" '
+    #         f'/sc once /st {retry_time} /f /rl highest'
+    #     )
+    #     self.logger.info(f"Retry task scheduled at {retry_time}")
+
     def schedule(self, retry_time: str):
         exe_path  = os.path.abspath(sys.argv[0])
         task_name = f"KRA_Retry_{retry_time.replace(':', '')}"
-        os.system(f'schtasks /delete /tn "{task_name}" /f >nul 2>&1')
-        os.system(
-            f'schtasks /create /tn "{task_name}" '
-            f'/tr "\\"{exe_path}\\" --retry" '
-            f'/sc once /st {retry_time} /f /rl highest'
+        
+        # Delete existing retry task first
+        result = subprocess.run(
+            f'schtasks /delete /tn "{task_name}" /f',
+            shell=True, capture_output=True
         )
-        self.logger.info(f"Retry task scheduled at {retry_time}")
+
+        self.logger.info(
+            f"Delete retry task {task_name}: "
+            f"RC={result.returncode} "
+            f"OUT={result.stdout} "
+            f"ERR={result.stderr}"
+        )
+        
+        # Create with SYSTEM account, same as main tasks
+        result = subprocess.run(
+            f'schtasks /create '
+            f'/tn "{task_name}" '
+            f'/tr "\\"{exe_path}\\" --retry" '
+            f'/sc once '
+            f'/st {retry_time} '
+            f'/f '
+            f'/ru SYSTEM',
+            shell=True, capture_output=True, text=True
+        )
+        
+        if result.returncode == 0:
+            self.logger.info(f"Retry task scheduled at {retry_time}")
+        else:
+            self.logger.warning(f"Failed to schedule retry task: {result.stderr.strip()}")
+
+
+    def remove_retry_tasks(self):
+        try:
+            result = subprocess.run(
+                'schtasks /query /fo list',
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+
+            for line in result.stdout.splitlines():
+
+                if "TaskName:" in line and "KRA_Retry_" in line:
+
+                    task_name = line.split(":", 1)[1].strip()
+
+                    subprocess.run(
+                        f'schtasks /delete /tn "{task_name}" /f',
+                        shell=True,
+                        capture_output=True
+                    )
+
+        except Exception:
+            pass      
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -797,10 +920,19 @@ def main():
             transaction["LastStatus"] = status
             failed_transactions.append(transaction)
 
-        report_entries.append(entry)
+        if is_retry:
+            # Overwrite the original row, don't append
+            sheets.update_report_entry(
+                qr_link=transaction["QRLink"],
+                data=entry,
+                retry_count=retry_data["retry_count"]
+            )
+        else:    
+            entry["retry_count"] = 0
+            report_entries.append(entry)
 
     # ── Write all results in one batch API call ───────────────────────
-    if report_entries:
+    if report_entries and not is_retry:
         sheets.add_report_entries(report_entries)
 
 
@@ -822,8 +954,12 @@ def main():
             )
         else:
             logger.warning("All retries exhausted")
+            # Retries exhausted:
+            retry_manager.remove_retry_tasks()
             retry_manager.delete()
     else:
+        # All transactions succeeded (no failed_transactions):
+        retry_manager.remove_retry_tasks() 
         retry_manager.delete()
     logger.info("=" * 60)
     logger.flush()

@@ -1,4 +1,4 @@
-# KRA Auto-Checker System v2.1
+# KRA Auto-Checker System v2.4
 
 An automated ops system that monitors KRA eTIMS transaction submissions across petrol station mini PCs. Runs silently in the background via Windows Task Scheduler, reports to Google Sheets, and self-updates remotely.
 
@@ -642,17 +642,6 @@ pyinstaller --onefile --console --name kra_checker ^
   --hidden-import config_loader ^
   --hidden-import packaging ^
   kra_auto_checker.py
-
-
-<!-- pyinstaller --onefile --console --name heartbeat_monitor ^
-  --hidden-import pyodbc ^
-  --hidden-import googleapiclient ^
-  --hidden-import googleapiclient.http ^
-  --hidden-import google.auth ^
-  --hidden-import google.oauth2.service_account ^
-  --hidden-import config_loader ^
-  --hidden-import packaging ^
-  heartbeat_monitor.py -->
 
   pyinstaller --onefile --console --name heartbeat_monitor ^
   --hidden-import pyodbc ^
